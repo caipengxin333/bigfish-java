@@ -1,0 +1,297 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "BigFish Foundation API",
+    "version": "1.0.0",
+    "description": "仅描述已实现接口。未实现的直播/播放接口在其他文档中约定。"
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:18080"
+    }
+  ],
+  "paths": {
+    "/api/v1/bootstrap": {
+      "get": {
+        "operationId": "bootstrap",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bootstrap"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/config": {
+      "get": {
+        "operationId": "getConfig",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigSnapshot"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateConfig",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateConfigRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigSnapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "字段无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "版本冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/actuator/health": {
+      "get": {
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "应用健康，响应含 status=UP"
+          },
+          "503": {
+            "description": "应用不健康"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "RuntimeSettings": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "profileName",
+          "persona",
+          "roomId",
+          "model",
+          "maxOutputTokens",
+          "voice",
+          "readComment",
+          "welcomeIntervalSeconds",
+          "synthesisQueueCapacity",
+          "playbackQueueCapacity",
+          "priorities"
+        ],
+        "properties": {
+          "profileName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "persona": {
+            "type": "string",
+            "maxLength": 8000
+          },
+          "roomId": {
+            "type": "string",
+            "pattern": "^[0-9]{0,30}$"
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "maxOutputTokens": {
+            "type": "integer",
+            "minimum": 32,
+            "maximum": 2048
+          },
+          "voice": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "readComment": {
+            "type": "boolean"
+          },
+          "welcomeIntervalSeconds": {
+            "type": "integer",
+            "minimum": 5,
+            "maximum": 600
+          },
+          "synthesisQueueCapacity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "playbackQueueCapacity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "priorities": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "gift",
+              "comment",
+              "follow",
+              "entrance"
+            ],
+            "properties": {
+              "gift": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "comment": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "follow": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "entrance": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100
+              }
+            }
+          }
+        }
+      },
+      "ConfigSnapshot": {
+        "type": "object",
+        "required": [
+          "version",
+          "updatedAt",
+          "settings"
+        ],
+        "properties": {
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/RuntimeSettings"
+          }
+        }
+      },
+      "UpdateConfigRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedVersion",
+          "settings"
+        ],
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1
+          },
+          "settings": {
+            "$ref": "#/components/schemas/RuntimeSettings"
+          }
+        }
+      },
+      "ApiError": {
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "Bootstrap": {
+        "type": "object",
+        "required": [
+          "application",
+          "version",
+          "mode",
+          "sessionState",
+          "capabilities"
+        ],
+        "properties": {
+          "application": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "SCAFFOLD",
+              "READY"
+            ]
+          },
+          "sessionState": {
+            "type": "string"
+          },
+          "capabilities": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    }
+  }
+}

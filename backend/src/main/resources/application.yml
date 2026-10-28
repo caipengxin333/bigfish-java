@@ -1,0 +1,30 @@
+server:
+  address: 127.0.0.1
+  port: ${BIGFISH_PORT:18080}
+spring:
+  application:
+    name: bigfish-java
+  datasource:
+    url: jdbc:sqlite:${BIGFISH_DATA_DIR:./runtime}/app.db
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      maximum-pool-size: 1
+      connection-init-sql: PRAGMA busy_timeout=5000
+  sql:
+    init:
+      mode: always
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+      fail-on-missing-creator-properties: true
+      fail-on-null-for-primitives: true
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+bigfish:
+  data-dir: ${BIGFISH_DATA_DIR:./runtime}
