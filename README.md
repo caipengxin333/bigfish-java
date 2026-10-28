@@ -34,7 +34,7 @@ Maven 脚本会在 macOS 上定位 Java 21，并使用本项目 HTTPS 源和 `.c
 
 ## 数据与配置
 
-默认数据库 `runtime/app.db`，执行脚本时使用 worktree 下的绝对目录。worktree 的 `runtime/worktree.env` 只设置端口、数据路径，不放密钥。`runtime/` 与 `.cache/` 不入 Git。
+默认数据库 `runtime/app.db`，执行脚本时使用 worktree 下的绝对目录。worktree 的 `runtime/worktree.env` 只设置端口与 API 地址，脚本按本工作树自动确定数据路径，不放密钥。`runtime/` 与 `.cache/` 不入 Git。
 
 基础配置：backend/src/main/resources/application.yml（端口、数据库、日志等，改动一般重启）。业务配置：SQLite app_config 单行，版本 CAS 更新；前端 GET 后用 expectedVersion PUT，冲突返回 409。现在不接收 API Key，后端任务需另行实现凭据安全存储。
 

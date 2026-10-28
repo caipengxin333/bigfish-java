@@ -23,9 +23,9 @@ for role in backend frontend collector; do
   fi
   mkdir -p "$target/runtime"
   if [[ ! -f "$target/runtime/worktree.env" ]]; then
-    # %q safely quotes workspace paths containing spaces or non-ASCII text.
-    printf 'export BIGFISH_PORT=%q\nexport BIGFISH_UI_PORT=%q\nexport BIGFISH_API_TARGET=%q\nexport BIGFISH_DATA_DIR=%q\n' \
-      "$port" "$ui" "http://127.0.0.1:$port" "$target/runtime" > "$target/runtime/worktree.env"
+    # Keep this file ASCII. Startup scripts derive the data path from their own worktree.
+    printf 'export BIGFISH_PORT=%s\nexport BIGFISH_UI_PORT=%s\nexport BIGFISH_API_TARGET=%s\n' \
+      "$port" "$ui" "http://127.0.0.1:$port" > "$target/runtime/worktree.env"
   fi
   printf '%s: %s (%s), API=%s UI=%s\n' "$role" "$target" "$branch" "$port" "$ui"
 done
