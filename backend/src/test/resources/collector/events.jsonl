@@ -1,0 +1,13 @@
+{"kind":"COMMENT","messageId":"fixture-chat-1","roomId":"mock-room","userId":"mock-user-a","username":"测试观众甲","content":"你好"}
+{"kind":"GIFT","messageId":"fixture-single","roomId":"mock-room","userId":"mock-user-a","username":"测试观众甲","giftId":"gift-1","giftName":"测试小心心","cumulativeQuantity":0}
+{"kind":"GIFT","messageId":"fixture-combo-1","roomId":"mock-room","userId":"mock-user-a","giftId":"gift-1","giftName":"测试小心心","comboId":"combo-1","cumulativeQuantity":1,"unitValue":1}
+{"kind":"GIFT","messageId":"fixture-combo-3","roomId":"mock-room","userId":"mock-user-a","giftId":"gift-1","giftName":"测试小心心","comboId":"combo-1","cumulativeQuantity":3,"unitValue":1}
+{"kind":"GIFT","messageId":"fixture-combo-3","roomId":"mock-room","userId":"mock-user-a","giftId":"gift-1","giftName":"测试小心心","comboId":"combo-1","cumulativeQuantity":3,"unitValue":1}
+{"kind":"GIFT","messageId":"fixture-combo-final","roomId":"mock-room","userId":"mock-user-a","giftId":"gift-1","giftName":"测试小心心","comboId":"combo-1","cumulativeQuantity":3,"unitValue":1}
+{"kind":"GIFT","messageId":"fixture-other-user","roomId":"mock-room","userId":"mock-user-b","giftId":"gift-1","giftName":"测试小心心","comboId":"combo-1","cumulativeQuantity":1,"unitValue":1}
+{"kind":"GIFT","messageId":"fixture-other-group","roomId":"mock-room","userId":"mock-user-a","giftId":"gift-1","giftName":"测试小心心","comboId":"combo-2","cumulativeQuantity":1,"unitValue":1}
+{deliberately-malformed-synthetic-packet
+{"kind":"UNSUPPORTED","messageId":"fixture-unknown","roomId":"mock-room"}
+{"kind":"FOLLOW","messageId":"fixture-follow","roomId":"mock-room","userId":"mock-user-a"}
+{"kind":"ENTRANCE","messageId":"fixture-entrance","roomId":"mock-room","userId":"mock-user-b"}
+{"kind":"LIKE","messageId":"fixture-like","roomId":"mock-room","userId":"mock-user-a","likeCount":2}
