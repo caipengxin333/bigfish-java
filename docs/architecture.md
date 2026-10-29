@@ -1,6 +1,6 @@
 # 架构与第一阶段范围
 
-状态：框架基线，业务引擎待各任务实现。开发分离、交付可合并；单 Java 进程，不引入微服务、Redis、消息中间件或配置中心。
+状态：三个功能分支已合并，Java MOCK 会话和 Vue 舞台闭环已接线；真实抖音与人声 TTS 待接入。开发分离、交付可合并；单 Java 进程，不引入微服务、Redis、消息中间件或配置中心。
 
 ## 数据通路
 
@@ -19,17 +19,18 @@ CollectorPort → EventIngress → 事件校验/去重 → 分类有界队列 �
 - configuration/persistence/management：配置、SQLite、会话管理与 REST，后端负责。
 - frontend：管理与舞台，前端负责。
 
-## 骨架 API 与计划 API
+## 已实现 API
 
 现有：GET /api/v1/bootstrap，GET /api/v1/config，PUT /api/v1/config，GET /actuator/health。
-计划接口（尚未实现、不能在 UI 中假装成功）：
-- POST /api/v1/sessions：创建会话；默认 mock，真实接入需要显式 mode=DOUYIN。
+会话与播放接口：
+- POST /api/v1/sessions：创建会话；显式 mode=MOCK / conversationMode=MOCK；DOUYIN 当前返回 422。
 - POST /api/v1/sessions/{sessionId}/stop：幂等停止。
 - GET /api/v1/runtime：会话、采集状态、队列深度、播放端、错误指标。
 - POST /api/v1/events/simulate：只允许 MOCK 会话，通过标准校验和调度器。
 - GET /api/v1/audio/{assetId}：受控同源音频读取，禁止任意路径读取。
 - WS /ws/stage：见 playback-protocol.md。
-后端实现前由集成窗口确认这些端点的具体 schema 并更新 OpenAPI。
+- POST /api/v1/sessions/{sessionId}/replay：就绪播放端下回放人工采集事件，验证累计礼物转增量。
+具体请求/响应见 OpenAPI 和公共 RuntimeView DTO。
 
 ## 配置策略
 

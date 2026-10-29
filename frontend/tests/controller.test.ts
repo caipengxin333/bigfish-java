@@ -38,6 +38,14 @@ test('handshake is per page; READY needs lease plus explicit audio enable', asyn
   s.lease(); assert.equal(s.wire.sent.some(x => x.type === 'PLAYER_READY'), false)
   await s.controller.enable(); assert.equal(s.wire.sent.at(-1).type, 'PLAYER_READY')
 })
+test('no running session closes the handshake immediately with an actionable hint', async () => {
+  const s = setup()
+  s.receive('SESSION_STOPPED', { reason: 'NO_SESSION' }, '')
+  assert.equal(s.controller.view.connection, 'closed')
+  assert.equal(s.controller.view.history[0].code, 'NO_SESSION')
+  assert.equal(s.wire.closed, true)
+  await s.controller.enable(); assert.equal(s.audio.enabled, false)
+})
 test('STARTED and COMPLETED only follow actual audio callbacks; subtitles and volume stop with audio', async () => {
   const s = setup(); s.lease(); await s.controller.enable(); s.receive('PLAY_TASK', s.task())
   assert.equal(s.audio.starts, 1); assert.equal(s.ack().length, 0); assert.equal(s.controller.view.subtitle, '')

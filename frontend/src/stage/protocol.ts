@@ -26,6 +26,7 @@ export function taskView(p: RecordValue, origin: string) {
 }
 export type StageTask = NonNullable<ReturnType<typeof taskView>>
 export const reasons: Record<string, string> = {
+  NO_SESSION: '尚未启动会话。请先点击启动模拟会话，再连接播放端。',
   COMPLETED: '播放已结束，等待下一任务。',
   SESSION_CACHE_FULL: '本页已记录 128 个停止会话，停止建立新连接；请刷新页面并重新握手。',
   CONNECT_TIMEOUT: '连接或租约握手超时，请检查服务后重连。', DISCONNECTED: '连接断开，已停止音频并清空字幕。',

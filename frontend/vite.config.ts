@@ -7,7 +7,7 @@ export default defineConfig({
     proxy: {
       '/api': process.env.BIGFISH_API_TARGET || 'http://127.0.0.1:18080',
       '/actuator': process.env.BIGFISH_API_TARGET || 'http://127.0.0.1:18080',
-      '/ws': { target: process.env.BIGFISH_API_TARGET || 'http://127.0.0.1:18080', ws: true },
+      '/ws': { target: process.env.BIGFISH_API_TARGET || 'http://127.0.0.1:18080', ws: true, changeOrigin: false },
     },
   },
 })

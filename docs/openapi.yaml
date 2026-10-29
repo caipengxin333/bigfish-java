@@ -1,9 +1,9 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "BigFish Foundation API",
+    "title": "BigFish Integrated API",
     "version": "1.0.0",
-    "description": "仅描述已实现接口。未实现的直播/播放接口在其他文档中约定。"
+    "description": "已实现的配置、MOCK 会话、模拟采集回放和播放接口；真实抖音及人声 TTS 未接入。"
   },
   "servers": [
     {
@@ -99,6 +99,272 @@
           },
           "503": {
             "description": "应用不健康"
+          }
+        }
+      }
+    },
+    "/api/v1/runtime": {
+      "get": {
+        "operationId": "runtime",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions": {
+      "post": {
+        "operationId": "startSession",
+        "responses": {
+          "201": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "校验失败或操作不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "校验失败或操作不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "校验失败或操作不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "校验失败或操作不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartSessionRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{sessionId}/stop": {
+      "post": {
+        "operationId": "stopSession",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "校验失败或操作不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "停止幂等，旧 ID 返回 409，不影响新会话。"
+      }
+    },
+    "/api/v1/sessions/{sessionId}/replay": {
+      "post": {
+        "operationId": "replaySession",
+        "responses": {
+          "202": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "校验失败或操作不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "仅当前 RUNNING/MOCK 会话且播放器已 READY；重建本次模拟采集源，回放人工评论和累计 1→3→3 礼物。"
+      }
+    },
+    "/api/v1/events/simulate": {
+      "post": {
+        "operationId": "simulateEvent",
+        "responses": {
+          "202": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventResult"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "重复事件",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventResult"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "会话不匹配",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventResult"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "队列拒绝",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "结构错误 ApiError 或内容校验 INVALID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "$ref": "#/components/schemas/EventResult"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiveEvent"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/audio/{assetId}": {
+      "get": {
+        "operationId": "audioAsset",
+        "parameters": [
+          {
+            "name": "assetId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "当前有效任务测试 WAV，no-store/nosniff，最大 2 MiB",
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "未注册、已停止、已过期或路径非法"
           }
         }
       }
@@ -246,8 +512,7 @@
       "ApiError": {
         "type": "object",
         "required": [
-          "code",
-          "message"
+          "code"
         ],
         "properties": {
           "code": {
@@ -291,6 +556,320 @@
             }
           }
         }
+      },
+      "StartSessionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "mode",
+          "conversationMode"
+        ],
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "MOCK",
+              "DOUYIN"
+            ]
+          },
+          "conversationMode": {
+            "type": "string",
+            "enum": [
+              "MOCK",
+              "DEEPSEEK"
+            ]
+          }
+        },
+        "description": "必须显式选择。当前 DOUYIN 返回 422；DEEPSEEK 需要服务端环境凭据及 BIGFISH_ALLOW_PAID=true，无静默回退。"
+      },
+      "QueueStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "depth",
+          "capacity"
+        ],
+        "properties": {
+          "depth": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "capacity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
+      },
+      "RuntimeView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sessionId",
+          "state",
+          "mode",
+          "conversationMode",
+          "speechMode",
+          "roomId",
+          "savedConfigVersion",
+          "appliedConfigVersion",
+          "queues",
+          "player",
+          "collector",
+          "dropped",
+          "failures"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "STOPPED",
+              "STARTING",
+              "RUNNING",
+              "STOPPING",
+              "FAILED"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "MOCK"
+            ]
+          },
+          "conversationMode": {
+            "type": "string",
+            "enum": [
+              "MOCK",
+              "DEEPSEEK"
+            ]
+          },
+          "speechMode": {
+            "type": "string",
+            "enum": [
+              "LOCAL_TEST_TONE"
+            ]
+          },
+          "roomId": {
+            "type": "string"
+          },
+          "savedConfigVersion": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "appliedConfigVersion": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "queues": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "comments",
+              "templates",
+              "synthesis",
+              "playback",
+              "modelActive",
+              "speechActive"
+            ],
+            "properties": {
+              "comments": {
+                "$ref": "#/components/schemas/QueueStatus"
+              },
+              "templates": {
+                "$ref": "#/components/schemas/QueueStatus"
+              },
+              "synthesis": {
+                "$ref": "#/components/schemas/QueueStatus"
+              },
+              "playback": {
+                "$ref": "#/components/schemas/QueueStatus"
+              },
+              "modelActive": {
+                "type": "boolean"
+              },
+              "speechActive": {
+                "type": "boolean"
+              }
+            }
+          },
+          "player": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "connected",
+              "ready",
+              "playing",
+              "leaseGeneration"
+            ],
+            "properties": {
+              "connected": {
+                "type": "boolean"
+              },
+              "ready": {
+                "type": "boolean"
+              },
+              "playing": {
+                "type": "boolean"
+              },
+              "leaseGeneration": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          },
+          "collector": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "mode",
+              "state",
+              "received",
+              "emitted",
+              "duplicates",
+              "rejected",
+              "lastError"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "MOCK"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "STOPPED",
+                  "CONNECTING",
+                  "CONNECTED",
+                  "RECONNECTING",
+                  "ENDED",
+                  "FAILED"
+                ]
+              },
+              "received": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "emitted": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "duplicates": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "rejected": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "lastError": {
+                "type": "string"
+              }
+            }
+          },
+          "dropped": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "failures": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "description": "collector 计数属于最近一次回放，dropped/failures 为进程累计；appliedConfigVersion 是最近接收任务使用的版本，队列内任务保留各自快照。READY/bootstrap 不代表真实抖音或人声服务可用。"
+      },
+      "EventResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "result"
+        ],
+        "properties": {
+          "result": {
+            "type": "string",
+            "enum": [
+              "ACCEPTED",
+              "DUPLICATE",
+              "REJECTED_FULL",
+              "REJECTED_SESSION",
+              "INVALID"
+            ]
+          }
+        }
+      },
+      "LiveEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "eventId",
+          "sessionId",
+          "roomId",
+          "type",
+          "userId",
+          "username",
+          "receivedAt",
+          "payload"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              1
+            ]
+          },
+          "eventId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "roomId": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "COMMENT",
+              "GIFT",
+              "FOLLOW",
+              "ENTRANCE",
+              "LIKE"
+            ]
+          },
+          "userId": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "receivedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "payload": {
+            "type": "object",
+            "description": "按 docs/event-schema.md 类型白名单校验；GIFT quantity 是正增量，unitValue 可为 null；COMMENT 仅 content。"
+          }
+        },
+        "description": "receivedAt 服务端覆盖；仅当前 MOCK 会话和 mock-room 可接收；不发送平台评论。"
       }
     }
   }

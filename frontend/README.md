@@ -2,7 +2,7 @@
 
 ## 开发与验证
 
-从仓库根目录分别运行 `./scripts/dev-backend.sh`、`./scripts/dev-frontend.sh`，脚本读取当前工作树 `runtime/worktree.env`。本工作树端口为后端 18082、前端 15175，不连接主集成服务。
+从仓库根目录分别运行 `./scripts/dev-backend.sh`、`./scripts/dev-frontend.sh`，脚本读取当前工作树 `runtime/worktree.env`。主集成目录端口为后端 18080、前端 15173；前端开发工作树仍为 18082/15175，按 runtime/worktree.env 隔离。
 
 在 frontend 目录运行：
 
@@ -17,7 +17,7 @@ npm run build
 ## 模式和边界
 
 - `/admin`、`/stage` 默认真实模式；显式选择 `?transport=mock` 才启用浏览器演示，不自动回退。
-- 真实管理页仅访问现有 bootstrap/config。会话操作、运行生效版本、采集/播放状态与队列指标尚无公开 schema，显示待接入或不可用。
+- 真实接口模式已接入 bootstrap/config/runtime/session/simulate/replay；当前 Java 数据源和回复默认 MOCK、声音为 300ms 测试音，页面明确标识。
 - 已保存配置、表单草稿和运行生效版本分开。409/超时/网络失败保留草稿；读取最新版本后明确选择保留草稿或采用服务器内容。保留草稿是整份配置覆盖，不能自动合并不同字段。
 - Mock 配置在此浏览器同源 localStorage 保存，通过 Web Locks 串行检查版本；演示运行状态仅在当前管理页内存中。停止演示通过 BroadcastChannel 通知同源 mock 舞台。
 - 管理页不实例化 AudioContext。前端不提供供应商密钥输入，不访问供应商 API。
@@ -26,13 +26,13 @@ npm run build
 
 真实模式使用同源 `/ws/stage`。只有拿到租约、用户点击“启用声音”、AudioContext 进入 running 后才发送 PLAYER_READY。连接中不预加载声音，浏览器不维护待播放队列。
 
-音频仅来自同源 `/api/v1/audio/{assetId}`，拒绝跳转、查询参数、片段、路径穿越和外源地址。当前 assetId 接受字母、数字、下划线、连字符及一个扩展名点号。下载流限制 20 MiB，下载/解码整体限时 12 秒，音频最长 120 秒。以上是前端本地保护限制，待集成统一。
+音频仅来自同源 `/api/v1/audio/{assetId}`，拒绝跳转、查询参数、片段、路径穿越和外源地址。当前 assetId 接受字母、数字、下划线、连字符及一个扩展名点号。下载流限制 20 MiB，下载/解码整体限时 12 秒，音频最长 120 秒。以上是前端本地保护上限；当前后端仅提供最大 2 MiB 的 300ms 测试 WAV，STARTED 等待 5 秒、播放完成等待 30 秒。真实长音频接入前须一起调整。
 
 STARTED 跟随已启动音频源的音频时钟推进；COMPLETED 来自 source.onended，取消时先拆除 onended 防止误报。字幕只在 STARTED 后出现，嘴型由输出音频 RMS 驱动。取消、会话停止、断线、租约到期、音频失败及页面隐藏都立即静音并清空字幕/嘴型。隐藏页面主动断开是当前保守策略，需返回后重新连接；OBS 后台播放支持尚未验收。
 
 页面实例独立 playerId。任务去重缓存最多 2048 项，保留至任务到期且至少 15 分钟；不会淘汰仍受保护的 ID，容量满则拒绝连接中的新任务。停止会话最多记录 128 个，达到容量后停止新连接，须刷新并重新握手。缓存不跨刷新持久化，刷新后的 STARTED 去重仍需后端保障。断线不自动重连/重播，需手动连接并启用声音。
 
-协议文档尚未确定的握手 payload、会话绑定和错误码提案见 `../docs/handoffs/frontend.md`，不将本地解析类型作为新公共契约。
+握手 payload 和会话绑定已由集成确认，见 `../docs/playback-protocol.md`；未启动会话时提示 NO_SESSION。
 
 ## 手动验收
 
@@ -48,3 +48,7 @@ STARTED 跟随已启动音频源的音频时钟推进；COMPLETED 来自 source.
 `src/stage/avatar.ts` 导出 `stageAvatarKey`，可在应用创建时 `app.provide(stageAvatarKey, YourAvatar)` 替换默认组件。渲染组件接受 `mouthLevel`（0..1）、`speaking`、`connected`；由舞台统一控制音频，组件不得自行播音。
 
 默认 `PlaceholderAvatar.vue` 是为本项目手工编写的原创 SVG 鱼形角色；mock/stage.ts 的测试音为内存生成 PCM 正弦音。没有复制旧项目 Live2D 模型、纹理、声音、配置或第三方采集脚本。真实 Live2D SDK/模型需由集成窗口确认来源及许可证后再接入。
+
+## 集成验收入口
+
+默认 `/stage` 可直接启动 Java 模拟会话，然后连接播放端、启用声音，使用舞台内“模拟评论 / 模拟礼物 / 采集器连击回放”验证实际后端链路。管理页只显示状态，不发声。保持舞台前台，停止后必须重新启动会话及握手。

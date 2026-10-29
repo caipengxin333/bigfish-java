@@ -15,7 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 
-/** Internal application service. Management REST binding awaits the shared schema. */
+/** Internal engine; SessionService maps its state to the public management contract. */
 public final class RuntimeEngine implements EventIngress {
     public enum State { STOPPED, STARTING, RUNNING, STOPPING, FAILED }
     public record Status(String sessionId, State state, String mode, String conversationMode, String speechMode,

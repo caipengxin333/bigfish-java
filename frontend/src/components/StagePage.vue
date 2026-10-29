@@ -9,6 +9,7 @@ import { MockStageTransport, mockAudio } from '../mock/stage'
 import type { Scenario } from '../mock/stage'
 import { stageAvatarKey } from '../stage/avatar'
 import PlaceholderAvatar from './PlaceholderAvatar.vue'
+import BackendRuntimePanel from './BackendRuntimePanel.vue'
 const Avatar = inject(stageAvatarKey, PlaceholderAvatar)
 const view = shallowRef<StageView | null>(null)
 const controller = new StageController(new BrowserAudio(mode === 'mock' ? mockAudio : undefined), window.location.origin, value => { view.value = value })
@@ -46,6 +47,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); controller.dispose(); d
       <dl class="metadata"><div><dt>声音状态</dt><dd>{{ view.playing ? '实际播放中' : view.ready ? '待播' : '静音' }}</dd></div><div><dt>当前会话</dt><dd>{{ view.sessionId || '尚未分配' }}</dd></div><div><dt>当前任务</dt><dd>{{ view.taskId || '无' }}</dd></div><div><dt>租约到期</dt><dd>{{ view.leaseExpiresAt ? new Date(view.leaseExpiresAt).toLocaleTimeString('zh-CN') : '无有效租约' }}</dd></div></dl>
       <p class="muted small">声音只在本页播放。另一页面占用租约时保持静音；离开前台、断线或停止会立即清空音频与嘴型，返回后需重新连接并启用声音。</p>
     </section>
+    <BackendRuntimePanel v-if="mode === 'real'" compact />
     <section v-if="mode === 'mock'" class="panel">
       <h2>本地播放协议演练</h2><p class="muted">原创建模占位与内存生成的 4 秒测试音；没有真实采集、模型生成或 TTS。每个页面使用独立 playerId，Web Locks 保证本地演示只有一个播放端。</p>
       <div class="toolbar"><button :disabled="!view.ready" @click="scenario('normal')">播放测试音</button><button class="secondary" :disabled="!view.ready" @click="scenario('duplicate')">重发上一任务</button><button class="secondary" :disabled="!view.ready" @click="scenario('expired')">发送过期任务</button><button class="secondary" :disabled="!view.ready" @click="scenario('old-session')">发送旧会话任务</button></div>

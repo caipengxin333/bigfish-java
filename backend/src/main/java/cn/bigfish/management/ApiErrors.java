@@ -8,6 +8,10 @@ import org.springframework.web.bind.annotation.*;
 
 @RestControllerAdvice
 public class ApiErrors {
+    @ExceptionHandler(SessionService.SessionException.class)
+    ResponseEntity<?> session(SessionService.SessionException error) {
+        return ResponseEntity.status(error.status).body(Map.of("code",error.code));
+    }
     @ExceptionHandler(ConfigConflictException.class)
     ResponseEntity<?> conflict() { return ResponseEntity.status(409).body(Map.of("code", "CONFIG_CONFLICT", "message", "配置已被其他页面修改，请重新加载后保存。")); }
     @ExceptionHandler({MethodArgumentNotValidException.class, HttpMessageNotReadableException.class})

@@ -22,6 +22,7 @@ class ManagementIntegrationTest {
              catch (Exception e) { throw new ExceptionInInitializerError(e); } }
     @DynamicPropertySource static void database(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", () -> "jdbc:sqlite:" + DB);
+        registry.add("bigfish.data-dir", () -> DB.toString() + "-data");
     }
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper mapper;
@@ -44,7 +45,7 @@ class ManagementIntegrationTest {
     }
     @Test void bootstrapDoesNotAdvertiseUnimplementedFeatures() throws Exception {
         mvc.perform(get("/api/v1/bootstrap")).andExpect(status().isOk())
-            .andExpect(jsonPath("$.mode").value("SCAFFOLD"))
+            .andExpect(jsonPath("$.mode").value("READY"))
             .andExpect(jsonPath("$.capabilities.douyinCollector").value(false));
     }
     @Test void ignoresNoSecretFields() throws Exception {

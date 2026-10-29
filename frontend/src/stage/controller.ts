@@ -73,6 +73,9 @@ export class StageController {
     const msg = envelope(raw)
     if (!msg) { this.disconnect('INVALID_MESSAGE'); return }
     const p = msg.payload
+    if (msg.type === 'SESSION_STOPPED' && this.view.connection === 'connecting' && msg.sessionId === '' && p.reason === 'NO_SESSION') {
+      this.disconnect('NO_SESSION'); return
+    }
     if (msg.type === 'PLAYER_REJECTED') { this.disconnect(p.reason === 'PLAYER_ALREADY_ACTIVE' ? p.reason : 'MOCK_UNAVAILABLE'); return }
     if (msg.type === 'PLAYER_LEASE') {
       if (this.view.connection !== 'connecting' || p.playerId !== this.playerId || !generation(p.leaseGeneration) || !id(msg.sessionId) ||

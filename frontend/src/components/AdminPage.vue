@@ -5,6 +5,7 @@ import type { Bootstrap, ConfigSnapshot, Settings } from '../contracts'
 import { mode, pageUrl } from '../mode'
 import { mockConfig } from '../mock/config'
 import RuntimePanel from './RuntimePanel.vue'
+import BackendRuntimePanel from './BackendRuntimePanel.vue'
 const service = mode === 'mock' ? mockConfig : api
 const bootstrap = ref<Bootstrap | null>(null)
 const saved = ref<ConfigSnapshot | null>(null)
@@ -55,7 +56,8 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeLeave))
     <div class="toolbar"><a class="button secondary" :href="pageUrl('admin', mode === 'real' ? 'mock' : 'real')">{{ mode === 'real' ? '切换到本地 mock' : '切换到真实接口' }}</a><button class="secondary" :disabled="busy" @click="load">{{ busy ? '处理中…' : '读取最新版本' }}</button><span class="muted">{{ bootstrap ? (mode === 'mock' ? '本地演示可用' : `后端响应：${bootstrap.mode}`) : '运行信息未确认' }}</span></div>
     <div v-if="error" class="message error" role="alert">{{ error }}</div><div v-if="notice" class="message" role="status">{{ notice }}</div>
     <div v-if="latest" class="message warning"><p>本地基准 v{{ saved?.version }} → 最新保存 v{{ latest.version }}。保留草稿将以整份草稿覆盖最新配置，请先核对。</p><details><summary>查看最新保存内容</summary><pre>{{ JSON.stringify(copySettings(latest.settings), null, 2) }}</pre></details><div class="toolbar"><button :disabled="busy" @click="reconcile(true)">以最新版本保留草稿</button><button class="secondary" :disabled="busy" @click="reconcile(false)">采用最新配置，放弃草稿</button></div></div>
-    <RuntimePanel :bootstrap="bootstrap" :saved-version="saved?.version ?? null" :settings="saved?.settings ?? null" />
+    <BackendRuntimePanel v-if="mode === 'real'" />
+    <RuntimePanel v-else :bootstrap="bootstrap" :saved-version="saved?.version ?? null" :settings="saved?.settings ?? null" />
     <form v-if="draft && saved" @submit.prevent="save">
       <div class="form-title"><div><h2>基础配置</h2><p class="muted">已保存 v{{ saved.version }} · {{ dirty ? '有未保存修改' : '草稿与保存版本一致' }}</p><p class="muted">保存时间：{{ new Date(saved.updatedAt).toLocaleString('zh-CN') }}</p></div><button type="submit" :disabled="busy || needsReview || !!latest || !dirty">{{ busy ? '处理中…' : '保存配置' }}</button></div>
       <p v-if="needsReview" class="message warning">保存结果需要核对。请点击“读取最新版本”，草稿会保留。</p>
