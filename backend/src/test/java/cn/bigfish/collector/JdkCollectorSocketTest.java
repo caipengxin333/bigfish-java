@@ -25,6 +25,17 @@ import static cn.bigfish.collector.MockCollectorTest.await;
 import static org.junit.jupiter.api.Assertions.*;
 
 class JdkCollectorSocketTest {
+    @Test void rejectedHandshakeProducesFixedPermanentCodeWithoutResponseBody() throws Exception {
+        try (var peer = new DouyinRoomResolverTest.LocalHttp(exchange -> {
+            exchange.sendResponseHeaders(403, -1); exchange.close();
+        }); var socket = new JdkCollectorSocket(CollectorOptions.defaults(), new CollectorDiagnostics(), Clock.systemUTC())) {
+            var failure = assertThrows(DouyinFailure.class, () -> socket.openEndpoint(
+                    URI.create(peer.uri().toString().replace("http:", "ws:")), Map.of()));
+            assertEquals(DouyinFailure.Code.HANDSHAKE_REJECTED, failure.code()); assertNull(failure.getCause());
+            assertFalse(failure.code().retryable()); assertFalse(socket.isOpen());
+        }
+    }
+
     @Test void realJdkTransportReassemblesFragmentsAndSendsPingAckAndAutomaticPong() throws Exception {
         var diagnostics = new CollectorDiagnostics();
         try (var peer = new LoopbackPeer(); var socket = new JdkCollectorSocket(CollectorOptions.defaults(), diagnostics, Clock.systemUTC())) {

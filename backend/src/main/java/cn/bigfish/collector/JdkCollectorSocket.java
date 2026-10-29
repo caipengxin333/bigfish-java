@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
+import java.net.http.WebSocketHandshakeException;
 import java.nio.ByteBuffer;
 import java.time.Clock;
 import java.time.Duration;
@@ -49,6 +50,12 @@ final class JdkCollectorSocket implements CollectorSocket, WebSocket.Listener {
         try {
             socket = opening.get(12, TimeUnit.SECONDS);
             if (closed.get()) socket.abort();
+        } catch (java.util.concurrent.ExecutionException exception) {
+            close();
+            if (exception.getCause() instanceof WebSocketHandshakeException) {
+                throw new DouyinFailure(DouyinFailure.Code.HANDSHAKE_REJECTED);
+            }
+            throw exception;
         } catch (Exception exception) { close(); throw exception; }
     }
 
