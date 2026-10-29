@@ -1,5 +1,8 @@
 # 新窗口任务：Java 后端核心
 
+> 第一轮已完成。本轮请使用 [phase2-deepseek.md](phase2-deepseek.md)，不要重新执行本文件中的第一轮任务。
+
+
 将下方整段发送给在对应 worktree 新建的 Codex 任务。不要让多个任务打开同一个工作目录。
 
 ---

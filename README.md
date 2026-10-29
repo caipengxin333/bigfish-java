@@ -40,6 +40,8 @@ Maven 脚本会在 macOS 上定位 Java 21，并使用本项目 HTTPS 源和 `.c
 
 ## 文档与任务
 
+当前第二轮分工见 [真实服务接入计划](docs/phase2-plan.md)：DeepSeek、阿里云语音、抖音采集分别由三个现有工作树实现，主窗口统一 UI/API 与最终接线。
+
 - [架构与范围](docs/architecture.md)
 - [HTTP 接口](docs/openapi.yaml)：配置、会话、模拟事件、回放及音频接口。
 - [事件格式](docs/event-schema.md)

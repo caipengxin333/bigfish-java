@@ -6,6 +6,8 @@
 - 保留原 Luna 项目及本仓库已有修改。不得回滚他人的工作。
 
 ## 工作边界
+
+第二轮职责与独占目录见 docs/phase2-plan.md，优先于第一轮 prompts 和下方历史宽范围分工。原前端窗口本轮做 Java 阿里云 TTS；Vue、公共接口及会话接线由主集成窗口统一负责。
 1. 当前项目是独立的新实现，不是 Luna 的原地重写。首先阅读 README.md、docs/architecture.md、docs/task-boundaries.md、自己任务对应的 docs/prompts 文件。
 2. 只在指定 worktree 和分支工作；每次开工检查 `pwd`、`git branch --show-current`、`git status --short`。
 3. 不在同一工作目录同时运行多个会修改文件的任务。各 worktree 的端口、SQLite、音频和日志必须隔离；使用 scripts/dev-*.sh 自动载入 runtime/worktree.env。
