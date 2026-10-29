@@ -7,7 +7,7 @@ public record CollectorOptions(int queueCapacity, Duration queueTtl, int cacheCa
                                Duration cacheTtl, Duration reconnectBase, Duration reconnectMax,
                                Duration heartbeatInterval, Duration idleTimeout, int maxFrameBytes) {
     public CollectorOptions {
-        if (queueCapacity < 1 || cacheCapacity < 1 || maxFrameBytes < 128
+        if (queueCapacity < 1 || cacheCapacity < 1 || maxFrameBytes < 128 || maxFrameBytes > 16 * 1024 * 1024
                 || !positive(queueTtl) || !positive(cacheTtl) || !positive(reconnectBase)
                 || !positive(reconnectMax) || !positive(heartbeatInterval) || !positive(idleTimeout)
                 || reconnectMax.compareTo(reconnectBase) < 0

@@ -45,11 +45,13 @@ abstract class AbstractCollector implements CollectorPort {
     private synchronized void finish(Run context, State terminal) {
         if (context == null) { state = terminal; return; }
         if (context != run) return;
+        // A control packet/error already waiting for this monitor must not undo an explicit stop.
+        if (!context.active.get() && terminal != State.STOPPED) return;
         context.active.set(false);
-        state = terminal;
         context.events.clear();
         context.source.interrupt(); context.dispatcher.interrupt();
         context.closeConnection();
+        state = terminal;
     }
 
     protected abstract void collect(Run context) throws Exception;
@@ -68,10 +70,14 @@ abstract class AbstractCollector implements CollectorPort {
             this.requestedRoom = roomId; this.sessionId = sessionId;
             normalizer = new EventNormalizer(sessionId, options, diagnostics);
             source = Thread.ofPlatform().daemon().name("bigfish-collector-source").unstarted(() -> {
+                long started = System.nanoTime();
                 try { collect(this); }
-                catch (InterruptedException exception) { Thread.currentThread().interrupt(); }
+                catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    if (active.get()) { diagnostics.error(CONNECT_FAILURE, elapsedMillis(started)); finish(this, State.FAILED); }
+                }
                 catch (Exception exception) {
-                    if (active.get()) { diagnostics.error(CONNECT_FAILURE, 0); finish(this, State.FAILED); }
+                    if (active.get()) { diagnostics.error(CONNECT_FAILURE, elapsedMillis(started)); finish(this, State.FAILED); }
                 }
             });
             dispatcher = Thread.ofPlatform().daemon().name("bigfish-collector-dispatch").unstarted(() -> {
@@ -82,8 +88,9 @@ abstract class AbstractCollector implements CollectorPort {
                         if (!event.receivedAt().plus(options.queueTtl()).isAfter(clock.instant())) {
                             diagnostics.increment(EXPIRED); continue;
                         }
+                        long started = System.nanoTime();
                         try { sink.accept(event); diagnostics.increment(EMITTED); }
-                        catch (RuntimeException exception) { diagnostics.error(SINK_FAILURE, 0); }
+                        catch (RuntimeException exception) { diagnostics.error(SINK_FAILURE, elapsedMillis(started)); }
                     } catch (InterruptedException exception) { Thread.currentThread().interrupt(); break; }
                 }
             });
@@ -117,4 +124,6 @@ abstract class AbstractCollector implements CollectorPort {
             }
         }
     }
+
+    private static long elapsedMillis(long started) { return (System.nanoTime() - started) / 1_000_000; }
 }
