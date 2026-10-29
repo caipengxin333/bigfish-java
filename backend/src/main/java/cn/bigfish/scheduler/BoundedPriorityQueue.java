@@ -56,6 +56,9 @@ public final class BoundedPriorityQueue<T extends BoundedPriorityQueue.Item> {
         }
     }
     public synchronized int size() { return entries.size(); }
+    public synchronized void discardWhere(Predicate<T> predicate) {
+        entries.stream().filter(e -> predicate.test(e.value())).toList().forEach(this::remove);
+    }
     public synchronized void clear() { new ArrayList<>(entries).forEach(this::remove); }
     private Entry<T> worst() {
         return entries.stream().min(Comparator.<Entry<T>>comparingInt(e -> e.value().priority())
