@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BigFish 移动布局验收</title>
+<style>body{margin:16px;background:#e8efec;font:14px system-ui}iframe{border:1px solid #91afa3;display:block;max-width:100%;margin:12px 0 24px}a{margin-right:16px}output{display:block;margin:16px 0}</style>
+<h1>375px 布局 / 双页面租约验收</h1><p>仅开发验收夹具，不进入生产构建。两个舞台 iframe 是独立页面实例。</p>
+<output id="result">等待布局加载</output><button id="check">重新检查横向溢出</button>
+<h2>管理页 · 375px</h2><iframe title="375px 管理页" width="375" height="820" src="/admin?transport=mock"></iframe>
+<h2>舞台 A · 375px</h2><iframe title="375px 舞台 A" width="375" height="1000" src="/stage?transport=mock"></iframe>
+<h2>舞台 B · 375px</h2><iframe title="375px 舞台 B" width="375" height="1000" src="/stage?transport=mock"></iframe>
+<script>
+const check = () => { document.getElementById('result').textContent = [...document.querySelectorAll('iframe')].map(frame => { const doc = frame.contentDocument.documentElement; return `${frame.title}: ${doc.clientWidth}px / 内容 ${doc.scrollWidth}px ${doc.scrollWidth <= doc.clientWidth ? 'PASS' : 'FAIL'}` }).join('；') }
+document.getElementById('check').onclick = check
+window.addEventListener('load', check)
+</script></html>
