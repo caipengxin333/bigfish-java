@@ -7,7 +7,7 @@
 
 ## 工作边界
 
-第二轮职责与独占目录见 docs/phase2-plan.md，优先于第一轮 prompts 和下方历史宽范围分工。原前端窗口本轮做 Java 阿里云 TTS；Vue、公共接口及会话接线由主集成窗口统一负责。
+当前第三轮职责与独占目录见 docs/phase3-plan.md，优先于第二轮计划、第一轮 prompts 和历史宽范围分工。原前端窗口继续做 Java 阿里云 TTS；Vue、公共接口及会话接线由主集成窗口统一负责。独立 GitHub 上传按 docs/prompts/github-publish.md 执行，仅该任务在目标明确后可正常推送；三个实现窗口仍不推送。
 1. 当前项目是独立的新实现，不是 Luna 的原地重写。首先阅读 README.md、docs/architecture.md、docs/task-boundaries.md、自己任务对应的 docs/prompts 文件。
 2. 只在指定 worktree 和分支工作；每次开工检查 `pwd`、`git branch --show-current`、`git status --short`。
    - 每轮继续开发也要同步基线，不只首次开工。功能分支先执行 `git merge-base --is-ancestor main HEAD`；非 0 表示尚未包含当前 main。保留并核对本工作树已有改动，干净后执行 `git merge --no-edit main`，再阅读最新对应 handoff。不得用复制目录、reset 或整文件选一方替代合并。
