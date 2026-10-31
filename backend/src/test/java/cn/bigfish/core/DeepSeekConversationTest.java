@@ -40,6 +40,7 @@ class DeepSeekConversationTest {
                 for (String word : List.of("你好","，朋友！")) {
                     out.write(("data: {\"id\":\"local\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\""+word+"\"}}]}\n\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 }
+                out.write("data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n".getBytes());
                 out.write("data: [DONE]\n\n".getBytes());
             }
         }); server.start();
