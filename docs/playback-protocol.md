@@ -33,6 +33,7 @@ STARTED 必须在真正开始播放后发送；COMPLETED 在声音结束后发�
 - 初次 PLAYER_HELLO 的 envelope.sessionId 为空字符串；PLAYER_LEASE 返回当前会话 ID。没有运行会话时 SESSION_STOPPED reason=NO_SESSION，客户端应提示先启动会话。
 - PLAYER_READY 与 PLAYER_HEARTBEAT payload 都是 `{playerId, leaseGeneration}`，envelope 必须带租约绑定的 sessionId。HEARTBEAT_ACK 返回同样两字段及 expiresAt。
 - 每次新会话须重新连接、获取新租约和点击启用声音；不会自动恢复旧任务。
-- 当前服务端 STARTED 等待上限 5 秒、开始后完成等待上限 30 秒；测试音 300ms。真实长语音接入时必须同步调整音频时长与双方超时，不能直接套用浏览器 120 秒保护上限。
+- 服务端 STARTED 等待上限 5 秒；开始后完成期限为实际音频 duration + 5 秒，最多 30 秒。主会话只接收正时长且不超过 25 秒的音频，测试音 300ms。下发前还须有 duration + 10 秒以上剩余 TTL，预留开始和完成的等待预算。前端 120 秒是防御上限，不表示主会话允许该长度。
+- 合成文件在 AudioAssets 读取到受限内存后，由 SpeechPort.release 单文件释放；同源音频字节保留到完成回执、过期或取消。LocalTestSpeech 可复用测试音，不执行删除。
 - 当前舞台进入后台会主动静音断开。因此舞台也提供后端模拟事件按钮，方便在前台完成闭环。OBS/后台长期播放尚未验收。
 - 浏览器本地 transport=mock 与 Java MOCK 会话是不同测试层：联调使用默认真实 HTTP/WebSocket 接口，Java 仍显式选择 MOCK 数据源。

@@ -10,6 +10,21 @@ import org.junit.jupiter.api.io.TempDir;
 import static org.assertj.core.api.Assertions.*;
 
 class PlaybackCoordinatorTest {
+    @Test void durationControlsCompletionDeadlineAndShortTtlNeverStarts() throws Exception {
+        var clock=new CoreRig.MutableClock(); var assets=new AudioAssets(directory,clock);
+        var playback=new PlaybackCoordinator(clock,assets); playback.begin("s");
+        var peer=new CoreRig.Peer(); playback.hello(peer,"p"); playback.ready(peer,"s","p",1);
+        var expiredSoon=new PlaybackTask("short-ttl","s",1,"GIFT","hi","/api/v1/audio/short-ttl",60,clock.instant().plusSeconds(10));
+        var content=new AudioAssets.Content(new byte[]{1},"audio/wav");
+        playback.enqueue(expiredSoon,content,8,playback.status().epoch(),Duration.ofSeconds(2)); playback.tick(8);
+        assertThat(peer.tasks).isEmpty(); assertThat(assets.get("short-ttl")).isEmpty();
+        var task=new PlaybackTask("play","s",1,"GIFT","hi","/api/v1/audio/play",60,clock.instant().plusSeconds(60));
+        playback.enqueue(task,content,8,playback.status().epoch(),Duration.ofSeconds(2)); playback.tick(8);
+        playback.acknowledge(peer,new PlaybackAck("play","s","p",1,PlaybackAck.State.STARTED,clock.instant(),null));
+        clock.advance(Duration.ofSeconds(6)); playback.tick(8); assertThat(playback.status().playing()).isTrue();
+        clock.advance(Duration.ofSeconds(1)); playback.tick(8); assertThat(playback.status().playing()).isFalse();
+        assertThat(peer.closed).isTrue(); assertThat(assets.get("play")).isEmpty();
+    }
     @TempDir Path directory;
     @Test void newSessionWaitsForOldTransportToCloseBeforeGrantingAnotherLease() throws Exception {
         var clock = new CoreRig.MutableClock(); var assets = new AudioAssets(directory,clock);

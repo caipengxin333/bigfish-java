@@ -368,6 +368,52 @@
           }
         }
       }
+    },
+    "/api/v1/providers": {
+      "get": {
+        "operationId": "providers",
+        "description": "只检查本机配置和最近诊断，不访问云服务，不返回凭据。",
+        "responses": {
+          "200": {
+            "description": "供应商配置状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvidersView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/deepseek/check": {
+      "post": {
+        "operationId": "checkDeepSeekModels",
+        "description": "显式调用官方模型目录，无请求体；后端期限 10 秒，客户端应允许至少 12 秒；无生成请求，无自动后台轮询。",
+        "responses": {
+          "200": {
+            "description": "检查结果（需查看各验证字段）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCheck"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "未启用、缺凭据或检查失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -578,6 +624,15 @@
               "MOCK",
               "DEEPSEEK"
             ]
+          },
+          "speechMode": {
+            "type": "string",
+            "enum": [
+              "LOCAL_TEST_TONE",
+              "ALIYUN_NLS"
+            ],
+            "default": "LOCAL_TEST_TONE",
+            "description": "可省略以兼容第一轮客户端；显式 null 非法。真实 NLS 要求云调用开关、AppKey、Token 和支持音色。"
           }
         },
         "description": "必须显式选择。当前 DOUYIN 返回 422；DEEPSEEK 需要服务端环境凭据及 BIGFISH_ALLOW_PAID=true，无静默回退。"
@@ -618,7 +673,9 @@
           "player",
           "collector",
           "dropped",
-          "failures"
+          "failures",
+          "lastError",
+          "lastErrorAt"
         ],
         "properties": {
           "sessionId": {
@@ -650,7 +707,8 @@
           "speechMode": {
             "type": "string",
             "enum": [
-              "LOCAL_TEST_TONE"
+              "LOCAL_TEST_TONE",
+              "ALIYUN_NLS"
             ]
           },
           "roomId": {
@@ -788,6 +846,14 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          },
+          "lastError": {
+            "type": "string",
+            "description": "最近任务错误的稳定代码，不含供应商响应或凭据；新会话重置。"
+          },
+          "lastErrorAt": {
+            "type": "string",
+            "description": "ISO 时间；无错误时为空字符串。"
           }
         },
         "description": "collector 计数属于最近一次回放，dropped/failures 为进程累计；appliedConfigVersion 是最近接收任务使用的版本，队列内任务保留各自快照。READY/bootstrap 不代表真实抖音或人声服务可用。"
@@ -870,6 +936,120 @@
           }
         },
         "description": "receivedAt 服务端覆盖；仅当前 MOCK 会话和 mock-room 可接收；不发送平台评论。"
+      },
+      "ProviderState": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "configured",
+          "enabled",
+          "state",
+          "reason"
+        ],
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "state": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "description": "configured 只表示环境变量存在；enabled 表示同时满足显式调用开关，不代表真实请求通过。UNVERIFIED 不等于认证成功。"
+      },
+      "ProvidersView": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "deepseek",
+          "aliyun",
+          "douyin",
+          "aliyunVoices",
+          "speechTextLimit",
+          "audioDurationLimitSeconds"
+        ],
+        "properties": {
+          "deepseek": {
+            "$ref": "#/components/schemas/ProviderState"
+          },
+          "aliyun": {
+            "$ref": "#/components/schemas/ProviderState"
+          },
+          "douyin": {
+            "$ref": "#/components/schemas/ProviderState"
+          },
+          "aliyunVoices": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "speechTextLimit": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "audioDurationLimitSeconds": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "ModelCheck": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "authentication",
+          "selectedModel",
+          "generation",
+          "availableModels",
+          "code",
+          "elapsedMs"
+        ],
+        "properties": {
+          "authentication": {
+            "type": "string",
+            "enum": [
+              "NOT_CHECKED",
+              "PASSED",
+              "FAILED"
+            ]
+          },
+          "selectedModel": {
+            "type": "string",
+            "enum": [
+              "NOT_CHECKED",
+              "PASSED",
+              "FAILED"
+            ]
+          },
+          "generation": {
+            "type": "string",
+            "enum": [
+              "NOT_CHECKED",
+              "PASSED",
+              "FAILED"
+            ]
+          },
+          "availableModels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "code": {
+            "type": "string"
+          },
+          "elapsedMs": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "description": "显式 GET /models 检查结果；generation 始终 NOT_CHECKED，不生成回复。检查保存配置中的模型。"
       }
     }
   }

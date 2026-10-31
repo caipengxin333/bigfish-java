@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createRuntimeApi, isRuntime } from '../src/runtime-api.ts'
+import { createRuntimeApi, isModelCheck, isProviders, isRuntime } from '../src/runtime-api.ts'
 import { RequestError } from '../src/api.ts'
 const queue = { depth: 0, capacity: 8 }
 const runtime = { sessionId: 's', state: 'RUNNING', mode: 'MOCK', conversationMode: 'MOCK', speechMode: 'LOCAL_TEST_TONE', roomId: 'mock-room',
   savedConfigVersion: 1, appliedConfigVersion: 1, queues: { comments: queue, templates: queue, synthesis: queue, playback: queue, modelActive: false, speechActive: false },
   player: { connected: true, ready: true, playing: false, leaseGeneration: 1 },
-  collector: { mode: 'MOCK', state: 'CONNECTED', received: 0, emitted: 0, duplicates: 0, rejected: 0, lastError: '' }, dropped: 0, failures: 0 }
+  collector: { mode: 'MOCK', state: 'CONNECTED', received: 0, emitted: 0, duplicates: 0, rejected: 0, lastError: '' }, dropped: 0, failures: 0, lastError: '', lastErrorAt: '' }
 const fetcher = (fn: (...args: any[]) => any) => fn as typeof fetch
 
 test('runtime validates all displayed queue/player/collector fields', () => {
@@ -14,12 +14,32 @@ test('runtime validates all displayed queue/player/collector fields', () => {
   assert.equal(isRuntime({ ...runtime, queues: {} }), false)
   assert.equal(isRuntime({ ...runtime, player: { ...runtime.player, ready: 'true' } }), false)
   assert.equal(isRuntime({ ...runtime, speechMode: 'REAL' }), false)
+  assert.equal(isRuntime({ ...runtime, speechMode: 'ALIYUN_NLS', lastError: 'NLS_READ_TIMEOUT' }), true)
+  assert.equal(isRuntime({ ...runtime, lastError: undefined }), false)
 })
 test('start explicitly selects mock and stop/replay carry the session identity', async () => {
   const calls: any[] = []
   const api = createRuntimeApi(fetcher(async (url, init) => { calls.push([url, JSON.parse(init.body)]); return Response.json(runtime) }))
   await api.start(); await api.stop('s'); await api.replay('s')
-  assert.deepEqual(calls, [['/api/v1/sessions', { mode: 'MOCK', conversationMode: 'MOCK' }], ['/api/v1/sessions/s/stop', {}], ['/api/v1/sessions/s/replay', {}]])
+  assert.deepEqual(calls, [['/api/v1/sessions', { mode: 'MOCK', conversationMode: 'MOCK', speechMode: 'LOCAL_TEST_TONE' }], ['/api/v1/sessions/s/stop', {}], ['/api/v1/sessions/s/replay', {}]])
+})
+test('real providers are explicit and independent of mock event collection', async () => {
+  const api = createRuntimeApi(fetcher(async (_url, init) => {
+    assert.deepEqual(JSON.parse(init.body), { mode: 'MOCK', conversationMode: 'DEEPSEEK', speechMode: 'ALIYUN_NLS' })
+    return Response.json({ ...runtime, conversationMode: 'DEEPSEEK', speechMode: 'ALIYUN_NLS' })
+  }))
+  assert.equal((await api.start('DEEPSEEK', 'ALIYUN_NLS')).speechMode, 'ALIYUN_NLS')
+})
+test('provider status and explicit catalog check validate different contracts', async () => {
+  const p = { configured: false, enabled: false, state: 'MISSING', reason: 'MISSING_CREDENTIALS' }
+  const providers = { deepseek: p, aliyun: p, douyin: p, aliyunVoices: ['xiaoyun'], speechTextLimit: 300, audioDurationLimitSeconds: 25 }
+  const check = { authentication: 'PASSED', selectedModel: 'FAILED', generation: 'NOT_CHECKED', availableModels: ['test-model'], code: 'MODEL_NOT_FOUND', elapsedMs: 100 }
+  assert.equal(isProviders(providers), true); assert.equal(isProviders({ ...providers, aliyun: { ...p, enabled: 'true' } }), false)
+  assert.equal(isModelCheck(check), true); assert.equal(isModelCheck({ ...check, generation: 'READY' }), false)
+  const calls: any[] = []
+  const api = createRuntimeApi(fetcher(async (url, init) => { calls.push([url, init.method]); return Response.json(String(url).endsWith('/check') ? check : providers) }))
+  await api.providers(); await api.checkModel()
+  assert.deepEqual(calls, [['/api/v1/providers', 'GET'], ['/api/v1/providers/deepseek/check', 'POST']])
 })
 test('event rejection is visible and does not masquerade as success', async () => {
   const api = createRuntimeApi(fetcher(async (_url, init) => {

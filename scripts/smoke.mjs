@@ -10,7 +10,10 @@ async function json(path, init) {
 const health = await json('/actuator/health')
 assert.equal(health.status, 200); assert.equal(health.body.status, 'UP')
 const status = await json('/api/v1/bootstrap')
-assert.equal(status.body.mode, 'READY'); assert.equal(status.body.capabilities.speech, false)
+assert.equal(status.body.mode, 'READY')
+const providers = await json('/api/v1/providers')
+assert.equal(providers.status, 200); assert.equal(providers.body.douyin.enabled, false)
+assert.equal(status.body.capabilities.speech, providers.body.aliyun.enabled)
 for (const path of ['/admin', '/stage']) {
   const page = await fetch(base + path)
   assert.equal(page.status, 200)

@@ -79,4 +79,18 @@ class SessionApiIntegrationTest {
         String session=start();
         mvc.perform(post("/api/v1/sessions/"+session+"/replay")).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("PLAYER_NOT_READY"));
     }
+    @Test void optionalSpeechModeIsStrictAndProviderChecksNeverEnableCloudCalls() throws Exception {
+        for (String voice : new String[]{"null", "\"UNKNOWN\""})
+            mvc.perform(post("/api/v1/sessions").contentType("application/json")
+                .content("{\"mode\":\"MOCK\",\"conversationMode\":\"MOCK\",\"speechMode\":"+voice+"}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/v1/providers")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.deepseek.enabled").value(false)).andExpect(jsonPath("$.aliyun.enabled").value(false))
+            .andExpect(jsonPath("$.douyin.reason").value("SIGNER_NOT_IMPLEMENTED"))
+            .andExpect(jsonPath("$.aliyunVoices").isArray()).andExpect(jsonPath("$.speechTextLimit").value(300));
+        mvc.perform(post("/api/v1/providers/deepseek/check"))
+            .andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.code").value("PAID_CALLS_DISABLED"));
+        String session=start();
+        mvc.perform(get("/api/v1/runtime")).andExpect(jsonPath("$.lastError").value("")).andExpect(jsonPath("$.lastErrorAt").value(""));
+    }
 }

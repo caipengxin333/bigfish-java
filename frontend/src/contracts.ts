@@ -12,13 +12,24 @@ export interface Bootstrap {
 }
 
 export interface QueueStatus { depth: number; capacity: number }
+export type ConversationMode = 'MOCK' | 'DEEPSEEK'
+export type SpeechMode = 'LOCAL_TEST_TONE' | 'ALIYUN_NLS'
+export interface ProviderState { configured: boolean; enabled: boolean; state: string; reason: string }
+export interface ProvidersView {
+  deepseek: ProviderState; aliyun: ProviderState; douyin: ProviderState;
+  aliyunVoices: string[]; speechTextLimit: number; audioDurationLimitSeconds: number;
+}
+export interface ModelCheck {
+  authentication: 'NOT_CHECKED' | 'PASSED' | 'FAILED'; selectedModel: 'NOT_CHECKED' | 'PASSED' | 'FAILED';
+  generation: 'NOT_CHECKED' | 'PASSED' | 'FAILED'; availableModels: string[]; code: string; elapsedMs: number;
+}
 export interface RuntimeView {
   sessionId: string; state: 'STOPPED' | 'STARTING' | 'RUNNING' | 'STOPPING' | 'FAILED';
-  mode: 'MOCK'; conversationMode: 'MOCK' | 'DEEPSEEK'; speechMode: 'LOCAL_TEST_TONE'; roomId: string;
+  mode: 'MOCK'; conversationMode: ConversationMode; speechMode: SpeechMode; roomId: string;
   savedConfigVersion: number; appliedConfigVersion: number;
   queues: { comments: QueueStatus; templates: QueueStatus; synthesis: QueueStatus; playback: QueueStatus; modelActive: boolean; speechActive: boolean };
   player: { connected: boolean; ready: boolean; playing: boolean; leaseGeneration: number };
   collector: { mode: 'MOCK'; state: string; received: number; emitted: number; duplicates: number; rejected: number; lastError: string };
-  dropped: number; failures: number;
+  dropped: number; failures: number; lastError: string; lastErrorAt: string;
 }
 export type EventResult = 'ACCEPTED' | 'DUPLICATE' | 'REJECTED_FULL' | 'REJECTED_SESSION' | 'INVALID'

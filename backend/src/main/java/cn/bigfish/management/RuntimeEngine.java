@@ -21,7 +21,7 @@ public final class RuntimeEngine implements EventIngress {
     public record Status(String sessionId, State state, String mode, String conversationMode, String speechMode,
                          long savedConfigVersion, long appliedConfigVersion, String roomId, int comments,
                          int templates, int synthesis, boolean modelActive, boolean speechActive,
-                         long dropped, long failures, PlaybackCoordinator.Status playback) {}
+                         long dropped, long failures, PlaybackCoordinator.Status playback, String lastError, String lastErrorAt) {}
     private record Job(String id, LiveEvent event, ConfigSnapshot config, Instant expiresAt, Instant readyAt,
                        int priority, long epoch, String text) implements BoundedPriorityQueue.Item {
         Job withText(String value) { return new Job(id,event,config,expiresAt,readyAt,priority,epoch,value); }
@@ -30,7 +30,9 @@ public final class RuntimeEngine implements EventIngress {
     private final ConfigStore configs;
     private final ConversationPort mock;
     private final Supplier<ConversationPort> realFactory;
-    private final SpeechPort speech;
+    private final SpeechPort testSpeech;
+    private SpeechPort speech;
+    private String speechMode="LOCAL_TEST_TONE", lastError="", lastErrorAt="";
     private final PlaybackCoordinator playback;
     private final AudioAssets assets;
     private final Clock clock;
@@ -54,18 +56,20 @@ public final class RuntimeEngine implements EventIngress {
     public RuntimeEngine(ConfigStore configs, ConversationPort mock, Supplier<ConversationPort> realFactory,
                          SpeechPort speech, PlaybackCoordinator playback, AudioAssets assets, Clock clock,
                          Duration modelTimeout, Duration speechTimeout) {
-        this.configs = configs; this.mock = mock; this.realFactory = realFactory; this.speech = speech;
+        this.configs = configs; this.mock = mock; this.realFactory = realFactory; this.speech = speech; this.testSpeech=speech;
         this.playback = playback; this.assets = assets; this.clock = clock;
         this.modelTimeout = modelTimeout; this.speechTimeout = speechTimeout;
         configs.current();
     }
     public synchronized String startMock() { return startMock(false); }
     /** Real calls require both this explicit choice and the server-side credential/paid-call gate. */
-    public synchronized String startMock(boolean useDeepSeek) {
+    public synchronized String startMock(boolean useDeepSeek) { return startMock(useDeepSeek,testSpeech,"LOCAL_TEST_TONE"); }
+    public synchronized String startMock(boolean useDeepSeek, SpeechPort selectedSpeech, String selectedSpeechMode) {
         if (closed || (state != State.STOPPED && state != State.FAILED)) throw new IllegalStateException("SESSION_ACTIVE");
         state = State.STARTING;
         try {
             conversation = useDeepSeek ? realFactory.get() : mock;
+            speech=Objects.requireNonNull(selectedSpeech); speechMode=selectedSpeechMode; lastError=""; lastErrorAt="";
             conversationMode = useDeepSeek ? "DEEPSEEK" : "MOCK";
             sessionId = UUID.randomUUID().toString(); roomId = "mock-room";
             appliedVersion = configs.snapshot().version(); lastWelcome = Instant.MIN;
@@ -77,7 +81,11 @@ public final class RuntimeEngine implements EventIngress {
         if (!sessionId.equals(id) || state == State.STOPPED) return;
         state = State.STOPPING; // Close ingress before cancelling any asynchronous work.
         cancelModel(); cancelSpeech(); comments.clear(); templates.clear(); synthesis.clear(); recent.clear();
-        playback.stop("SESSION_STOPPED"); state = State.STOPPED;
+        playback.stop("SESSION_STOPPED");
+        if (conversation instanceof AutoCloseable closeable) {
+            try { closeable.close(); } catch (Exception ignored) { lastError="MODEL_CLOSE_FAILED"; lastErrorAt=clock.instant().toString(); }
+        }
+        state = State.STOPPED;
     }
     @Override public synchronized Result accept(LiveEvent input) {
         if (state != State.RUNNING || input == null || !sessionId.equals(input.sessionId())) return Result.REJECTED_SESSION;
@@ -145,8 +153,8 @@ public final class RuntimeEngine implements EventIngress {
         playback.tick(settings.playbackQueueCapacity());
         var player = playback.status();
         comments.trim(capacity,now); templates.trim(capacity,now); synthesis.trim(capacity,now);
-        if (modelJob != null && (!valid(modelJob) || !modelUntil.isAfter(now))) { failures++; cancelModel(); }
-        if (speechJob != null && (!valid(speechJob) || !speechUntil.isAfter(now))) { failures++; cancelSpeech(); }
+        if (modelJob != null && (!valid(modelJob) || !modelUntil.isAfter(now))) { failed("MODEL",modelJob,new TimeoutException()); cancelModel(); }
+        if (speechJob != null && (!valid(speechJob) || !speechUntil.isAfter(now))) { failed("SPEECH",speechJob,new TimeoutException()); cancelSpeech(); }
         // Do not spend model/TTS work when there is no ready player. On disconnect, purge epoch-bound work.
         comments.discardWhere(j -> j.epoch() != player.epoch());
         templates.discardWhere(j -> j.epoch() != player.epoch());
@@ -191,28 +199,43 @@ public final class RuntimeEngine implements EventIngress {
         } catch (RejectedExecutionException error) { modelJob = null; dropped++; }
     }
     private void startSpeech(Job job) {
-        Duration deadline = remaining(job,speechTimeout); speechUntil = clock.instant().plus(deadline);
+        Duration deadline = remaining(job,"ALIYUN_NLS".equals(speechMode) ? Duration.ofSeconds(10) : speechTimeout); speechUntil = clock.instant().plus(deadline);
+        SpeechPort port=speech;
         try {
             speechCall = speechWorker.submit(() -> {
+                SpeechPort.AudioAsset asset=null;
                 try {
-                    var asset = speech.synthesize(job.id(),job.text(),job.config().settings().voice(),deadline)
+                    asset = port.synthesize(job.id(),job.text(),job.config().settings().voice(),deadline)
                         .toCompletableFuture().get(deadline.toMillis(),TimeUnit.MILLISECONDS);
+                    if(asset.duration()==null || asset.duration().isNegative() || asset.duration().isZero()
+                        || asset.duration().compareTo(Duration.ofSeconds(25))>0)
+                        throw new cn.bigfish.speech.SpeechFailure(cn.bigfish.speech.SpeechFailure.Code.AUDIO_TOO_LONG);
                     var content = assets.load(asset);
                     synchronized (this) {
                         if (speechJob == job && valid(job)) {
                             var task = new PlaybackTask(job.id(),job.event().sessionId(),job.config().version(),job.event().type().name(),
                                 job.text(),"/api/v1/audio/" + job.id(),job.priority(),job.expiresAt());
-                            if (!playback.enqueue(task,content,configs.snapshot().settings().playbackQueueCapacity(),job.epoch())) dropped++;
+                            if (!playback.enqueue(task,content,configs.snapshot().settings().playbackQueueCapacity(),job.epoch(),asset.duration())) dropped++;
                         }
                     }
-                } catch (Exception error) { speech.cancel(job.id()); failed("SPEECH",job,error); }
-                finally { synchronized (this) { if (speechJob == job) { speechJob = null; speechCall = null; } } }
+                } catch (Exception error) { port.cancel(job.id()); failed("SPEECH",job,error); }
+                finally {
+                    try { if(asset!=null) port.release(asset); }
+                    catch(RuntimeException error) { failed("SPEECH",job,error); }
+                    synchronized (this) { if (speechJob == job) { speechJob = null; speechCall = null; } }
+                }
             });
         } catch (RejectedExecutionException error) { speechJob = null; dropped++; }
     }
     private synchronized void failed(String type, Job job, Exception error) {
         if (!valid(job)) return;
         failures++;
+        lastError=type+"_FAILED"; lastErrorAt=clock.instant().toString();
+        for(Throwable cause=error;cause!=null;cause=cause.getCause()) {
+            if(cause instanceof cn.bigfish.conversation.DeepSeekFailure known) { lastError="MODEL_"+known.diagnostic().code().name(); break; }
+            if(cause instanceof cn.bigfish.speech.SpeechFailure known) { lastError="NLS_"+known.code().name(); break; }
+            if(cause instanceof TimeoutException) lastError=type+"_OVERALL_TIMEOUT";
+        }
         log.warn("task_failure type={} errorType={} taskId={} elapsedMs={}",type,error.getClass().getSimpleName(),
             job.id(),Duration.between(job.event().receivedAt(),clock.instant()).toMillis());
     }
@@ -237,8 +260,8 @@ public final class RuntimeEngine implements EventIngress {
         if (speechCall != null) { speechCall.cancel(true); speechCall = null; }
     }
     public synchronized Status status() {
-        return new Status(sessionId,state,"MOCK",conversationMode,"LOCAL_TEST_TONE",configs.snapshot().version(),appliedVersion,
-            roomId,comments.size(),templates.size(),synthesis.size(),modelJob != null,speechJob != null,dropped,failures,playback.status());
+        return new Status(sessionId,state,"MOCK",conversationMode,speechMode,configs.snapshot().version(),appliedVersion,
+            roomId,comments.size(),templates.size(),synthesis.size(),modelJob != null,speechJob != null,dropped,failures,playback.status(),lastError,lastErrorAt);
     }
     @PreDestroy public synchronized void close() {
         closed = true; stop(sessionId); modelWorker.shutdownNow(); speechWorker.shutdownNow();

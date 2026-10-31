@@ -12,7 +12,7 @@ public final class PlaybackCoordinator {
         boolean send(String type, String sessionId, Object payload);
         void close();
     }
-    private record Queued(PlaybackTask task) implements BoundedPriorityQueue.Item {
+    private record Queued(PlaybackTask task, Duration duration) implements BoundedPriorityQueue.Item {
         public int priority() { return task.priority(); }
         public Instant expiresAt() { return task.expiresAt(); }
     }
@@ -29,6 +29,7 @@ public final class PlaybackCoordinator {
     private Instant leaseUntil = Instant.MIN, ackUntil = Instant.MIN;
     private boolean ready, started;
     private PlaybackTask current;
+    private Duration currentDuration=Duration.ofSeconds(25);
     public PlaybackCoordinator(Clock clock, AudioAssets assets) {
         this.clock = clock; this.assets = assets;
         queue = new BoundedPriorityQueue<>(q -> assets.remove(q.task().taskId()));
@@ -67,17 +68,21 @@ public final class PlaybackCoordinator {
         }
         switch (ack.state()) {
             case STARTED -> {
-                if (!started) { started = true; ackUntil = clock.instant().plusSeconds(30); }
+                if (!started) { started = true; ackUntil = clock.instant().plus(currentDuration.plusSeconds(5)); }
             }
             case COMPLETED -> { if (started) finish(); }
             case FAILED, CANCELLED -> finish();
         }
     }
     public synchronized boolean enqueue(PlaybackTask task, AudioAssets.Content content, int capacity, long expectedEpoch) {
+        return enqueue(task,content,capacity,expectedEpoch,Duration.ofSeconds(25));
+    }
+    public synchronized boolean enqueue(PlaybackTask task, AudioAssets.Content content, int capacity, long expectedEpoch, Duration duration) {
         expireLease();
+        if (duration==null || duration.isNegative() || duration.isZero() || duration.compareTo(Duration.ofSeconds(25))>0) return false;
         if (!task.sessionId().equals(sessionId) || epoch != expectedEpoch || !isReady()) return false;
         if (!assets.register(task.taskId(), sessionId, task.expiresAt(), content)) return false;
-        return queue.offer(new Queued(task), capacity, clock.instant());
+        return queue.offer(new Queued(task,duration), capacity, clock.instant());
     }
     public synchronized void tick(int capacity) {
         expireLease();
@@ -89,8 +94,12 @@ public final class PlaybackCoordinator {
         }
         if (current == null && isReady()) {
             var next = queue.poll(now);
+            // Reserve both the STARTED acknowledgement budget and the completion grace period.
+            while (next != null && !now.plus(next.duration()).plusSeconds(10).isBefore(next.task().expiresAt())) {
+                assets.remove(next.task().taskId()); next=queue.poll(now);
+            }
             if (next != null) {
-                current = next.task(); started = false; ackUntil = now.plusSeconds(5);
+                currentDuration=next.duration(); current = next.task(); started = false; ackUntil = now.plusSeconds(5);
                 send("PLAY_TASK", current);
             }
         }

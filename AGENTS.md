@@ -25,4 +25,4 @@
 - Live2D 模型及第三方采集代码要记录来源与许可证，不把“可下载”等同于可分发。未经确认不复制旧模型或 AGPL 签名脚本进新仓库。
 - 后端验证：`./scripts/maven.sh test`；前端：`cd frontend && npm ci && npm run build`。具体行为需要针对性测试。
 - 日志记录 error type、耗时和脱敏上下文，不打印 Cookie、签名 URL 或 Key。
-- 当前已集成配置、MOCK 采集/调度、管理 REST 与 WebSocket 播放；真实抖音连接提供器、人声 TTS 和真实模型请求尚未验收，不得与模拟闭环混淆。
+- 当前已集成配置、MOCK 采集/调度、管理 REST/WebSocket、DeepSeek/NLS 会话选择和供应商状态；真实请求尚未验收，抖音尚缺可用 signer，不得把本地替身通过视为真实闭环。最新结果见 docs/handoffs/phase2-integration.md。

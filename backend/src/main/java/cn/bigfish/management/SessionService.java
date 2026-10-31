@@ -2,6 +2,7 @@ package cn.bigfish.management;
 
 import cn.bigfish.collector.MockCollector;
 import cn.bigfish.configuration.ConfigStore;
+import cn.bigfish.configuration.ProviderServices;
 import cn.bigfish.contract.*;
 import jakarta.annotation.PreDestroy;
 import java.io.ByteArrayInputStream;
@@ -18,21 +19,23 @@ public final class SessionService {
     public static final class SessionException extends RuntimeException {
         public final String code;
         public final int status;
-        SessionException(String code, int status) { super(code); this.code = code; this.status = status; }
+        public SessionException(String code, int status) { super(code); this.code = code; this.status = status; }
     }
     private final RuntimeEngine engine;
     private final ConfigStore configs;
+    private final ProviderServices providers;
     private MockCollector collector;
     private AtomicLong rejected = new AtomicLong();
 
-    public SessionService(RuntimeEngine engine, ConfigStore configs) { this.engine = engine; this.configs = configs; }
+    public SessionService(RuntimeEngine engine, ConfigStore configs, ProviderServices providers) { this.engine = engine; this.configs = configs; this.providers = providers; }
 
     public synchronized RuntimeView start(StartSessionRequest request) {
         if (request.mode() != StartSessionRequest.Mode.MOCK) throw new SessionException("DOUYIN_UNAVAILABLE", 422);
         if (engine.status().state() != RuntimeEngine.State.STOPPED && engine.status().state() != RuntimeEngine.State.FAILED)
             throw new SessionException("SESSION_ACTIVE", 409);
+        SpeechPort selected=providers.speech(request.speechMode(),configs.snapshot().settings().voice());
         closeCollector();
-        try { engine.startMock(request.conversationMode() == StartSessionRequest.ConversationMode.DEEPSEEK); }
+        try { engine.startMock(request.conversationMode() == StartSessionRequest.ConversationMode.DEEPSEEK,selected,request.speechMode().name()); }
         catch (IllegalStateException error) { throw new SessionException("PROVIDER_UNAVAILABLE", 503); }
         // Empty source waits for an explicit replay; starting a session never invents viewer messages.
         replaceCollector(new byte[0]);
@@ -91,7 +94,7 @@ public final class SessionService {
                 s.modelActive(),s.speechActive()),new RuntimeView.Player(p.connected(),p.ready(),p.playing(),p.generation()),
             new RuntimeView.Collector("MOCK",collector == null ? "STOPPED" : collector.state().name(),
                 d == null ? 0 : d.count(RECEIVED),d == null ? 0 : d.count(EMITTED),d == null ? 0 : d.count(DUPLICATE),
-                rejected.get(),d == null ? "" : d.lastError()),s.dropped(),s.failures());
+                rejected.get(),d == null ? "" : d.lastError()),s.dropped(),s.failures(),s.lastError(),s.lastErrorAt());
     }
     private void closeCollector() { if (collector != null) collector.stop(); }
     @PreDestroy public synchronized void close() { engine.stop(engine.status().sessionId()); closeCollector(); }
