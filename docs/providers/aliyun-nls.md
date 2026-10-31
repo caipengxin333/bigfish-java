@@ -1,6 +1,6 @@
 # 阿里云 NLS 短文本语音（Java）
 
-本轮交付是独立 Java `SpeechPort` 适配器，未替换主会话 Bean。默认应用仍使用 `LocalTestSpeech`；不能根据此类存在就把页面标成“已合成”或“真实语音已就绪”。无新增依赖，不使用 Edge-TTS，不复制旧项目模型、配置或密钥。
+Java `SpeechPort` 适配器已接入主会话，可显式选择 ALIYUN_NLS；默认仍为 LocalTestSpeech。2026-11-01 已验证 zhigui 真实短句、解码及 Safari 播放回执。无新增依赖，不使用 Edge-TTS，不复制旧项目模型、配置或密钥。
 
 ## 官方依据与固定选择
 
@@ -20,7 +20,9 @@
 | zhigui | 女声、直播 | 可选 |
 | aixia | 女声 | 可选 |
 
-音色必须明确选择且属于 `AlibabaNlsSpeech.VOICES`；`zh-CN-XiaoyiNeural` 是 Edge 标识，直接传入返回 `NLS_UNSUPPORTED_VOICE`，不会猜测映射或偷偷降级。固定参数为 WAV / 16000 Hz / PCM 16-bit 单声道，volume=50、speech_rate=0、pitch_rate=0。扩展公开设置交主窗口提案。
+音色必须明确选择且属于 `AlibabaNlsSpeech.VOICES`；`zh-CN-XiaoyiNeural` 是 Edge 标识，直接传入返回 `NLS_UNSUPPORTED_VOICE`，不会猜测映射或偷偷降级。云端请求固定 format=pcm / 16000 Hz / PCM 16-bit 单声道，volume=50、speech_rate=0、pitch_rate=0；完整接收后由 PcmWav.fromPcm16Mono 按实际长度封装为标准 WAV，继续严格校验，SpeechPort 与浏览器仍接收 audio/wav。扩展公开设置交主窗口提案。
+
+真实 zhigui 请求曾返回 HTTP 200，但 WAV 头声明 230400 字节 PCM，实际仅 68798 字节，导致 NLS_INVALID_WAV。`c8be17c` 改用上述 PCM 路径；不能删除 RIFF/chunk 长度校验或任意改写供应商错误头来掩盖问题。原 WAV 严格检查仍保留，响应中的 JSON/HTML/XML 错误文档不得作为音频发布。
 
 只接受纯文本。空白、非法代理字符、控制字符（换行/制表符除外）、`<`/`>`（避免意外 SSML）本地拒绝。长度采用保守 UTF-16 计数，最多 300；补充平面字符计为 2。超限返回 `NLS_TEXT_TOO_LONG`，不截断、不拆分、不并发发整段长回复。
 
@@ -77,7 +79,7 @@ try {
 
 ## 本机凭据配置与独立验证
 
-当前开发进程没有 `BIGFISH_ALIYUN_NLS_APP_KEY` / `BIGFISH_ALIYUN_NLS_TOKEN`；未执行云端调用、未取得真实人声证据。请在阿里云控制台确认已开通 NLS TTS、上海项目 AppKey 及未过期的 NLS Token。不要把值发到聊天、写入仓库或粘贴进带字面量的命令历史。
+主项目已于 2026-11-01 用本机凭据完成 zhigui 真实验证，凭据未提交。其他工作树与进程仍需独立配置 `BIGFISH_ALIYUN_NLS_APP_KEY` / `BIGFISH_ALIYUN_NLS_TOKEN`；确认已开通 NLS TTS、上海项目 AppKey 及未过期的 NLS Token。不要把值发到聊天、写入仓库或粘贴进带字面量的命令历史。
 
 在自己的 **zsh 终端**中运行，输入过程不回显：
 
@@ -92,10 +94,10 @@ source runtime/worktree.env
 unset BIGFISH_ALIYUN_NLS_APP_KEY BIGFISH_ALIYUN_NLS_TOKEN
 ```
 
-该入口使用固定公开短句“你好，这是大肥鱼语音合成测试。”、xiaoyun、10 秒总期限，**一次 HTTP 尝试、无重试**。默认整个测试套件跳过它；只有 `-Dbigfish.nls.live=true` 才读取凭据并请求官方服务。一次验收最多手动运行 3 次，不做收费压测。
+该入口使用固定公开短句“你好，这是大肥鱼语音合成测试。”、默认 xiaoyun、10 秒总期限，**一次 HTTP 尝试、无重试**。可加 `-Dbigfish.nls.voice=zhigui` 验证知柜，仍限制为已有音色白名单。默认整个测试套件跳过它；只有 `-Dbigfish.nls.live=true` 才读取凭据并请求官方服务。一次验收最多手动运行 3 次，不做收费压测。
 
 成功时打印请求次数、耗时、字节数、采样率、时长和 Java Sound 解码结果，不打印凭据或供应商原始正文。默认成功后 release 文件。如需人工试听，在同一条命令增加 `-Dbigfish.nls.keepSample=true`：仅保留当前这一条文件并输出其本机路径，音频不入 Git、不自动播放。试听确认中文人声/内容完整后记录结论；处理保留样本时只删除该次返回的明确文件。缺凭据、权限或 Token 失效时测试失败，不能将跳过/失败算作成功。
 
-同一终端设置的变量不会自动注入已运行的桌面应用或其他终端；在上述终端运行独立验证即可。未来启动服务仍使用 `scripts/dev-backend.sh` / `scripts/dev-frontend.sh`，它们加载本工作树环境。当前未接主会话，启动脚本本身不会自动切换 TTS。
+同一终端设置的变量不会自动注入已运行的桌面应用或其他终端；在上述终端运行独立验证即可。启动服务仍可使用 `scripts/dev-backend.sh` / `scripts/dev-frontend.sh`，它们加载本工作树环境。主会话需在管理页显式选择阿里云 NLS，启动脚本本身不会自动切换 TTS。
 
 默认本地验证：`./scripts/maven.sh -B -ntp test`。本地 HTTP 服务只绑定 127.0.0.1 随机端口，不访问其他工作树实例。生成的测试 tone 只证明格式、时长与错误处理，不能替代真实合成/试听、浏览器播放链路或长期稳定性验收。

@@ -6,7 +6,9 @@ Java + Spring / Vue 的独立直播互动项目。原 `../AI-Vtuber` 保留用�
 
 已完成：两轮三个分支集成，SQLite 配置、会话启停/状态/模拟事件接口、有界调度、礼物模板、模拟采集回放、同源音频、独占播放租约，以及管理页与舞台的 HTTP/WebSocket 接线。DeepSeek 和阿里云 NLS 适配器已接入会话，可分别选择回复和语音服务；通过本地替身、超时/取消/重试/文件释放测试。
 
-尚未验收：真实 DeepSeek 请求、阿里云真实合成、真实抖音收消息、Live2D 和 OBS 长期后台播放。抖音已实现房间解析、连接提供器和协议处理，但缺少可实际使用的签名实现，主会话仍拒绝 DOUYIN。默认 Java MOCK + MOCK 回复 + 300ms 测试音，无 Key 也可运行；填写房间号或音色不会自动连接真实服务。bootstrap.mode=READY 只表示管理引擎就绪；speech 表示后端已配置阿里云凭据并启用云调用，真实验证状态须看 /providers，不能据此宣称已连通。
+2026-11-01 已验证阿里云知柜（zhigui）真实短句合成、Java Sound 解码及 Safari 的 STARTED/COMPLETED 播放回执。适配器请求 PCM，再按实际字节数本地封装 WAV，解决云端 WAV 长度字段不一致导致的 NLS_INVALID_WAV。后续语音开发先同步 main 并阅读 [语音维护交接](docs/handoffs/phase2-speech.md)。
+
+尚未独立验收：真实 DeepSeek 供应商专项、真实抖音收消息、Live2D 和 OBS 长期后台播放。抖音已实现房间解析、连接提供器和协议处理，但缺少可实际使用的签名实现，主会话仍拒绝 DOUYIN。默认 Java MOCK + MOCK 回复 + 300ms 测试音，无 Key 也可运行；填写房间号或音色不会自动连接真实服务。bootstrap.mode=READY 只表示管理引擎就绪；speech 表示后端已配置阿里云凭据并启用云调用，真实验证状态须看 /providers，不能据此宣称已连通。
 
 技术基线：Java 21、Spring Boot 3.5.11、Spring AI 1.1.8（库依赖，无启动时 Key 要求）、SQLite JDBC 3.49.1.0、Vue 3.5.22、Vite 7.1.12。Node 建议 22.12+ 或 24 LTS，Maven 3.9+。这里选择可验证的 3.5/1.1 稳定组合，未采用此前讨论过的 Boot 4 / Spring AI 2 组合。
 

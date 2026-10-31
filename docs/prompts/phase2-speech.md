@@ -1,5 +1,7 @@
 # 第二轮任务二：阿里云官方语音合成（Java）
 
+> 维护更新（2026-11-01）：main 的 `c8be17c` 已修复真实合成的 NLS_INVALID_WAV。开始新工作前先同步 main，再读 docs/handoffs/phase2-speech.md 顶部维护记录。请求必须使用 PCM，由本地按实际长度封装 WAV；保留对应回归测试，不能恢复为直接请求并使用供应商 WAV。
+
 你在原前端窗口继续，但这轮职责改为 Java TTS，Vue 和公共播放接线由主集成窗口负责。工作目录名称 frontend 不限制语言，里面仍是完整仓库；不新建工作树、不换分支、不重复改上一轮页面。
 
 工作目录：`/Volumes/ZHITAI_MAC/创业项目测试/大肥鱼直播/bigfish-worktrees/frontend`
@@ -22,7 +24,7 @@
 ## 本任务范围
 
 仅修改 speech 包、对应 speech 测试/夹具、docs/providers/aliyun-nls.md 和 docs/handoffs/phase2-speech.md。不改 conversation、collector、CoreConfiguration、RuntimeEngine、AudioAssets、播放协议、Vue 或 POM。
-实现既有 SpeechPort，保留 LocalTestSpeech。优先 Java 21 HttpClient + 现有 Jackson 调用阿里云 NLS 短文本 REST TTS，选择 WAV 输出，避免先引入 Python 服务。若确实需要 SDK，把组件/固定版本/用途/许可证写成依赖提案，由集成统一处理；不要照抄官方旧示例依赖版本。
+实现既有 SpeechPort，保留 LocalTestSpeech。优先 Java 21 HttpClient + 现有 Jackson 调用阿里云 NLS 短文本 REST TTS，请求 PCM 并在本地封装 WAV 输出，避免先引入 Python 服务。若确实需要 SDK，把组件/固定版本/用途/许可证写成依赖提案，由集成统一处理；不要照抄官方旧示例依赖版本。
 
 ## 要完成的工作
 

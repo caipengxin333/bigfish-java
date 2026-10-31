@@ -1,6 +1,23 @@
 # 第二轮阿里云 NLS 语音交接
 
-Java TTS 适配器与本地验证已完成并提交；真实云端合成/人声试听、主会话接线和浏览器联调尚未验证。
+## 最新维护记录：2026-11-01（主集成窗口）
+
+- 维护分支：主项目 `main`；修复前基线 `76ad2b0`，代码修复提交 **`c8be17c`**（`fix: wrap Alibaba NLS PCM with accurate WAV lengths`）。本记录与协作规则随后单独提交。
+- 现象：zhigui 返回 HTTP 200/audio/mpeg，实际是 WAV；文件总长 68842，头部声明 230444，data 声明 230400、实际 68798。旧校验正确识别不一致后返回 NLS_INVALID_WAV，导致未发布语音。
+- 实现：官方请求改为 `format=pcm`，固定 16000 Hz/16bit/mono，完整接收后按实际字节数本地封装 WAV。不放宽已有 WAV 长度/格式/非空/非静音/时长检查，不修改前端音频协议、不增加依赖。
+- 回归：新增实际 PCM 长度与解码帧数一致、部分帧/容量/错误容器拒绝、供应商长度不一致仍拒绝、错误文档冒充音频拒绝。默认完整后端测试 **140 项，139 通过，1 项真实服务默认跳过，0 failures/errors**。
+- 真实短句：`AlibabaNlsLiveTest -Dbigfish.nls.live=true -Dbigfish.nls.voice=zhigui`，独立诊断音频目录；**1 次请求，816ms，78762 字节 WAV，16000Hz，2459ms，Java Sound decode=PASS**。本窗口本轮总共 2 次 NLS 请求（1 次原 WAV 诊断 + 1 次新适配器验证），不含用户自行点击测试。
+- 主进程已重启；随后观察 Safari 的多条 STARTED/COMPLETED 回执，/providers 阿里云为 ACCEPTED/SUCCESS，/runtime failures=0，lastError 为空。用户实际听感、其他音色、长期运行和 Token 自动续期仍需分别验证。
+- 源码只改 speech 包及对应测试。实际样本与日志仅保存在主项目忽略目录 runtime/diagnostics，不含于 Git 提交；没有修改其他工作树。
+
+### 此窗口下次继续前
+
+1. 在自己的 `bigfish-worktrees/frontend` 检查分支与状态，保护已有修改；工作区干净后执行 `git merge --no-edit main`。
+2. 执行 `git merge-base --is-ancestor c8be17c HEAD`，必须返回 0；再读最新 AGENTS.md 和本交接顶部。
+3. 保留 `format=pcm → 本地标准 WAV → 严格校验` 路径和上述回归。若要改变方案，先解释原因并提供等效真实短句/解码证据；不直接恢复供应商 WAV 路径或删校验。
+4. 交付前再同步最新 main，运行后端测试，记录新提交与验证；仅由主集成窗口合并回 main。
+
+以下为 **2026-10-30 的历史交付记录**，其中“尚未集成/真实请求为 0”只描述当日状态，以顶部维护记录为准。
 
 ## 分支、基线与提交
 
