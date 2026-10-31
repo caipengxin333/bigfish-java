@@ -4,6 +4,7 @@ import cn.bigfish.contract.SpeechPort;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
 import java.net.http.*;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.*;
@@ -113,7 +114,7 @@ public final class AlibabaNlsSpeech implements SpeechPort, AutoCloseable {
         try {
             NlsTokenProvider.Token token = await(job, tokens.acquire(remaining(job)).toCompletableFuture());
             byte[] payload = mapper.writeValueAsBytes(Map.of("appkey", appKey, "text", text, "voice", voice,
-                "format", "wav", "sample_rate", 16000, "volume", 50, "speech_rate", 0, "pitch_rate", 0));
+                "format", "pcm", "sample_rate", 16000, "volume", 50, "speech_rate", 0, "pitch_rate", 0));
             for (int attempt = 1; attempt <= options.attempts(); attempt++) {
                 check(job);
                 HttpResponse<byte[]> response = request(job, payload, token);
@@ -129,10 +130,13 @@ public final class AlibabaNlsSpeech implements SpeechPort, AutoCloseable {
                     }
                     throw new SpeechFailure(error);
                 }
-                PcmWav.Info info = PcmWav.inspect(response.body());
+                // NLS WAV headers can advertise a different size from the completed HTTP body.
+                // Request raw PCM and write our own exact-length header; keep strict WAV validation.
+                byte[] wav = PcmWav.fromPcm16Mono(response.body());
+                PcmWav.Info info = PcmWav.inspect(wav);
                 synchronized (job) {
                     check(job);
-                    files.write(job.ticket, response.body());
+                    files.write(job.ticket, wav);
                     check(job);
                     tokens.accepted(token);
                     AudioAsset asset = new AudioAsset(job.ticket.path(), "audio/wav", info.duration());
@@ -190,7 +194,8 @@ public final class AlibabaNlsSpeech implements SpeechPort, AutoCloseable {
         if (http >= 500 && http <= 599) return PROVIDER_UNAVAILABLE;
         if (http >= 300 && http < 400) return HTTP_REJECTED;
         String type = response.headers().firstValue("Content-Type").orElse("").split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
-        if (http == 200 && (type.equals("audio/mpeg") || type.equals("audio/wav") || type.equals("audio/x-wav"))) return null;
+        if (http == 200 && (type.equals("audio/mpeg") || type.equals("audio/wav") || type.equals("audio/x-wav")
+            || type.equals("audio/pcm")) && !isErrorDocument(response.body())) return null;
         try {
             if (response.body().length > 16_384) return INVALID_RESPONSE;
             var status = mapper.readTree(response.body()).path("status");
@@ -203,6 +208,19 @@ public final class AlibabaNlsSpeech implements SpeechPort, AutoCloseable {
                 default -> INVALID_RESPONSE;
             };
         } catch (Exception ignored) { return INVALID_RESPONSE; }
+    }
+    private boolean isErrorDocument(byte[] body) {
+        String prefix = new String(body, 0, Math.min(body.length, 128), StandardCharsets.UTF_8).stripLeading();
+        String lower = prefix.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("<!doctype html") || lower.startsWith("<html") || lower.startsWith("<?xml")
+            || lower.startsWith("<error")) return true;
+        if (body.length <= 16_384 && (prefix.startsWith("{") || prefix.startsWith("["))) {
+            try {
+                var document = mapper.readTree(body);
+                return document != null && document.isContainerNode();
+            } catch (Exception ignored) { /* A PCM sample may start with a JSON punctuation byte. */ }
+        }
+        return false;
     }
     private long retryDelay(HttpResponse<?> response) {
         long nanos = options.cooldown().toNanos();

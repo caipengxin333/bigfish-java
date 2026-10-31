@@ -24,7 +24,7 @@ class AlibabaNlsSpeechTest {
     private final ObjectMapper mapper = new ObjectMapper();
     private final AtomicReference<HttpHandler> handler = new AtomicReference<>();
     private final AtomicInteger received = new AtomicInteger();
-    private final byte[] audio = SpeechFixtures.wav(4800);
+    private final byte[] audio = SpeechFixtures.pcm(4800);
     private static final Duration BUDGET = Duration.ofSeconds(3);
     @BeforeEach void start() throws Exception {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -61,7 +61,7 @@ class AlibabaNlsSpeechTest {
         assertThat(token.get()).isEqualTo("local-test-token-only");
         var sent = mapper.readTree(body.get());
         assertThat(sent.path("text").asText()).isEqualTo("你好 + & %，大肥鱼。");
-        assertThat(sent.path("format").asText()).isEqualTo("wav");
+        assertThat(sent.path("format").asText()).isEqualTo("pcm");
         assertThat(sent.path("sample_rate").asInt()).isEqualTo(16000);
         assertThat(sent.path("voice").asText()).isEqualTo("xiaoyun");
         assertThat(sent.has("token")).isFalse();
@@ -142,13 +142,24 @@ class AlibabaNlsSpeechTest {
         failure(say("parameters"), INVALID_PARAMETERS); awaitIdle();
         handler.set(x -> respond(x, 200, "application/json", "{\"status\":20000000}".getBytes()));
         failure(say("json"), INVALID_RESPONSE); awaitIdle();
-        handler.set(x -> respond(x, 200, "audio/mpeg", Arrays.copyOf(audio, audio.length - 2)));
+        handler.set(x -> respond(x, 200, "audio/mpeg", Arrays.copyOf(audio, audio.length - 1)));
         failure(say("truncated"), INVALID_WAV); awaitIdle();
         handler.set(x -> respond(x, 200, "audio/mpeg", new byte[0]));
         failure(say("empty"), INVALID_WAV); awaitIdle();
         handler.set(x -> respond(x, 200, "audio/mpeg", new byte[PcmWav.MAX_BYTES + 1]));
         failure(say("large"), AUDIO_TOO_LARGE); awaitIdle();
         assertThat(received.get()).isEqualTo(5); assertNoWavs();
+        handler.set(x -> respond(x, 200, "audio/mpeg", audio)); speech.release(get("next", "你好"));
+    }
+    @Test void rejectsErrorDocumentsAndWavEvenWhenContentTypeClaimsAudio() throws Exception {
+        for (String document : List.of("{\"status\":20000000}", "<html>error</html>", "<?xml version=\"1.0\"?><error/>")) {
+            handler.set(x -> respond(x, 200, "audio/mpeg", document.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+            failure(say("document"), INVALID_RESPONSE); awaitIdle();
+        }
+        byte[] mismatched = SpeechFixtures.wav(34399);
+        java.nio.ByteBuffer.wrap(mismatched).order(java.nio.ByteOrder.LITTLE_ENDIAN).putInt(4, 230436).putInt(40, 230400);
+        handler.set(x -> respond(x, 200, "audio/mpeg", mismatched));
+        failure(say("unexpected-wav"), INVALID_WAV); awaitIdle(); assertNoWavs();
         handler.set(x -> respond(x, 200, "audio/mpeg", audio)); speech.release(get("next", "你好"));
     }
     @Test void deadlineBeforeHeadersCancelsRequestAndRecovers() throws Exception {

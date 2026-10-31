@@ -21,6 +21,8 @@ class AlibabaNlsLiveTest {
         assertThat(directory.isAbsolute()).as("Use an absolute worktree audio directory").isTrue();
         String appKey = System.getenv("BIGFISH_ALIYUN_NLS_APP_KEY");
         String token = System.getenv("BIGFISH_ALIYUN_NLS_TOKEN");
+        String voice = System.getProperty("bigfish.nls.voice", "xiaoyun");
+        assertThat(AlibabaNlsSpeech.VOICES.contains(voice)).as("Supported NLS voice").isTrue();
         // Assert only booleans, so a failure never renders a credential value.
         assertThat(appKey != null && !appKey.isBlank()).as("BIGFISH_ALIYUN_NLS_APP_KEY present").isTrue();
         assertThat(token != null && !token.isBlank()).as("BIGFISH_ALIYUN_NLS_TOKEN present").isTrue();
@@ -28,7 +30,7 @@ class AlibabaNlsLiveTest {
         try (var speech = new AlibabaNlsSpeech(URI.create("https://nls-gateway-cn-shanghai.aliyuncs.com/stream/v1/tts"),
                 directory, new ObjectMapper(), appKey, new StaticNlsTokenProvider(token, null), options)) {
             long start = System.nanoTime();
-            var asset = speech.synthesize(UUID.randomUUID().toString(), "你好，这是大肥鱼语音合成测试。", "xiaoyun", Duration.ofSeconds(10))
+            var asset = speech.synthesize(UUID.randomUUID().toString(), "你好，这是大肥鱼语音合成测试。", voice, Duration.ofSeconds(10))
                 .toCompletableFuture().get(11, TimeUnit.SECONDS);
             boolean retain = false;
             try {
@@ -42,8 +44,8 @@ class AlibabaNlsLiveTest {
                 }
                 assertThat(info.duration()).isEqualTo(asset.duration());
                 assertThat(speech.diagnostics().requests()).isEqualTo(1);
-                System.out.printf("NLS live: voice=xiaoyun requests=%d elapsedMs=%d bytes=%d sampleRate=%d durationMs=%d decode=PASS%n",
-                    speech.diagnostics().requests(), TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start),
+                System.out.printf("NLS live: voice=%s requests=%d elapsedMs=%d bytes=%d sampleRate=%d durationMs=%d decode=PASS%n",
+                    voice, speech.diagnostics().requests(), TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start),
                     Files.size(asset.path()), info.sampleRate(), info.duration().toMillis());
                 retain = Boolean.getBoolean("bigfish.nls.keepSample");
                 if (retain)

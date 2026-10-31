@@ -10,6 +10,31 @@ import static org.assertj.core.api.Assertions.*;
 import static cn.bigfish.speech.SpeechFailure.Code.*;
 
 class PcmWavTest {
+    @Test void rawPcmIsWrappedWithExactLengthsAndDecodedWithoutSampleChanges() throws Exception {
+        byte[] pcm = SpeechFixtures.pcm(34399);
+        byte[] wav = PcmWav.fromPcm16Mono(pcm);
+        ByteBuffer header = ByteBuffer.wrap(wav).order(ByteOrder.LITTLE_ENDIAN);
+        assertThat(header.getInt(4)).isEqualTo(wav.length - 8);
+        assertThat(header.getInt(40)).isEqualTo(pcm.length);
+        var info = PcmWav.inspect(wav);
+        try (var decoded = AudioSystem.getAudioInputStream(new ByteArrayInputStream(wav))) {
+            assertThat(decoded.getFrameLength()).isEqualTo(34399);
+            assertThat(decoded.readAllBytes()).isEqualTo(pcm);
+            assertThat(info.duration()).isEqualTo(Duration.ofNanos(34399L * 1_000_000_000 / 16000));
+        }
+    }
+    @Test void rawPcmRejectsPartialFramesContainersAndSizeOverflow() {
+        for (byte[] bytes : new byte[][]{new byte[0], new byte[]{1}, SpeechFixtures.wav(800)})
+            assertThatThrownBy(() -> PcmWav.fromPcm16Mono(bytes)).hasMessage("NLS_INVALID_WAV");
+        assertThatThrownBy(() -> PcmWav.fromPcm16Mono(new byte[PcmWav.MAX_BYTES - 42])).hasMessage("NLS_AUDIO_TOO_LARGE");
+        reject(PcmWav.fromPcm16Mono(new byte[1600]), AUDIO_SILENT);
+        reject(PcmWav.fromPcm16Mono(SpeechFixtures.pcm(16000 * 61)), AUDIO_TOO_LONG);
+    }
+    @Test void providerWavWithMismatchedLengthRemainsInvalid() {
+        byte[] wav = SpeechFixtures.wav(34399);
+        ByteBuffer.wrap(wav).order(ByteOrder.LITTLE_ENDIAN).putInt(4, 230436).putInt(40, 230400);
+        reject(wav, INVALID_WAV);
+    }
     @Test void durationMatchesDecodedFrames() throws Exception {
         byte[] bytes = SpeechFixtures.wav(4800);
         var info = PcmWav.inspect(bytes);

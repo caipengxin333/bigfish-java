@@ -1,9 +1,14 @@
 package cn.bigfish.speech;
 
 import java.nio.*;
+import java.util.Arrays;
 
 /** Generated PCM tone only, not a fixture claiming to be cloud speech. Contains no provider secrets. */
 final class SpeechFixtures {
+    static byte[] pcm(int samples) {
+        byte[] wav = wav(samples);
+        return Arrays.copyOfRange(wav, 44, wav.length);
+    }
     static byte[] wav(int samples) {
         ByteBuffer b = ByteBuffer.allocate(44 + samples * 2).order(ByteOrder.LITTLE_ENDIAN);
         b.put(new byte[]{'R','I','F','F'}).putInt(36 + samples * 2).put(new byte[]{'W','A','V','E','f','m','t',' '});
