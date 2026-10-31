@@ -23,14 +23,14 @@ public final class DouyinCollector extends AbstractCollector {
     @Override public String mode() { return "DOUYIN"; }
 
     @Override protected void collect(Run context) throws Exception {
-        if (!context.requestedRoom.matches("[0-9]{1,30}")) throw new DouyinConnectionProvider.UnavailableException();
+        String webRoom = DouyinRoomInput.parse(context.requestedRoom).webRoomId();
         var protocol = new DouyinProtocol(options.maxFrameBytes(), diagnostics());
         int failures = 0;
         String resolvedRoom = null;
         while (context.active.get()) {
             long started = System.nanoTime();
             try {
-                DouyinConnection connection = provider.resolve(context.requestedRoom);
+                DouyinConnection connection = provider.resolve(webRoom);
                 if (!context.active.get()) return;
                 // A new broadcast in the same web room requires a new backend session.
                 if (resolvedRoom != null && !resolvedRoom.equals(connection.internalRoomId)) {
@@ -43,6 +43,7 @@ public final class DouyinCollector extends AbstractCollector {
                 socket.open(connection);
                 if (!context.active.get()) return;
                 context.transition(State.CONNECTED);
+                diagnostics().increment(CONNECTED);
                 long connectedAt = System.nanoTime(), nextHeartbeat = connectedAt;
                 while (context.active.get()) {
                     var frame = socket.poll(Duration.ofMillis(Math.min(100, options.heartbeatInterval().toMillis())));
@@ -62,6 +63,11 @@ public final class DouyinCollector extends AbstractCollector {
                 }
             } catch (DouyinConnectionProvider.UnavailableException exception) { throw exception; }
             catch (InterruptedException exception) { throw exception; }
+            catch (DouyinFailure failure) {
+                if (!context.active.get()) return;
+                if (!failure.code().retryable()) throw failure;
+                diagnostics().error(failure.code(), (System.nanoTime() - started) / 1_000_000);
+            }
             catch (Exception exception) {
                 if (!context.active.get()) return;
                 diagnostics().error(TRANSPORT_FAILURE, (System.nanoTime() - started) / 1_000_000);

@@ -24,6 +24,11 @@ abstract class AbstractCollector implements CollectorPort {
     }
 
     public final CollectorDiagnostics diagnostics() { return diagnostics; }
+    public final synchronized CollectorResources resources() {
+        if (run == null) return new CollectorResources(0, 0, 0, 0);
+        return new CollectorResources(run.source.isAlive() ? 1 : 0, run.dispatcher.isAlive() ? 1 : 0,
+                run.events.size(), run.hasConnection() ? 1 : 0);
+    }
     public abstract String mode();
     @Override public final State state() { return state; }
 
@@ -76,6 +81,9 @@ abstract class AbstractCollector implements CollectorPort {
                     Thread.currentThread().interrupt();
                     if (active.get()) { diagnostics.error(CONNECT_FAILURE, elapsedMillis(started)); finish(this, State.FAILED); }
                 }
+                catch (DouyinFailure failure) {
+                    if (active.get()) { diagnostics.error(failure.code(), elapsedMillis(started)); finish(this, State.FAILED); }
+                }
                 catch (Exception exception) {
                     if (active.get()) { diagnostics.error(CONNECT_FAILURE, elapsedMillis(started)); finish(this, State.FAILED); }
                 }
@@ -102,7 +110,9 @@ abstract class AbstractCollector implements CollectorPort {
             long started = System.nanoTime();
             try {
                 normalizer.normalize(input, receivedAt).ifPresent(event -> {
-                    if (active.get() && !events.offer(event)) diagnostics.increment(QUEUE_FULL);
+                    synchronized (AbstractCollector.this) {
+                        if (active.get() && !events.offer(event)) diagnostics.increment(QUEUE_FULL);
+                    }
                 });
             } catch (RuntimeException exception) {
                 diagnostics.error(MALFORMED, (System.nanoTime() - started) / 1_000_000);
@@ -123,6 +133,7 @@ abstract class AbstractCollector implements CollectorPort {
                 connection = null;
             }
         }
+        synchronized boolean hasConnection() { return connection != null; }
     }
 
     private static long elapsedMillis(long started) { return (System.nanoTime() - started) / 1_000_000; }

@@ -7,7 +7,7 @@ import java.util.concurrent.atomic.LongAdder;
 /** Only fixed error codes and counts; never retains exception messages, frames, URLs or credentials. */
 public final class CollectorDiagnostics {
     public enum Counter { RECEIVED, EMITTED, DUPLICATE, MALFORMED, UNKNOWN, QUEUE_FULL, EXPIRED,
-        SINK_FAILURE, CONNECT_FAILURE, RECONNECT, TRANSPORT_FAILURE, HEARTBEAT, ACK, ENDED }
+        SINK_FAILURE, CONNECT_FAILURE, RECONNECT, TRANSPORT_FAILURE, HEARTBEAT, ACK, ENDED, CONNECTED }
 
     private final Map<Counter, LongAdder> counters = new ConcurrentHashMap<>();
     private volatile String lastError = "";
@@ -17,6 +17,12 @@ public final class CollectorDiagnostics {
     void error(Counter counter, long elapsedMillis) {
         increment(counter);
         lastError = counter.name();
+        lastErrorElapsedMillis = Math.max(0, elapsedMillis);
+    }
+
+    void error(DouyinFailure.Code code, long elapsedMillis) {
+        increment(Counter.CONNECT_FAILURE);
+        lastError = code.name();
         lastErrorElapsedMillis = Math.max(0, elapsedMillis);
     }
 
