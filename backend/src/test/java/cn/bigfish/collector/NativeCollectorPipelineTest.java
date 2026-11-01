@@ -76,14 +76,22 @@ class NativeCollectorPipelineTest {
                 await(() -> collector.state() == CollectorPort.State.CONNECTED);
                 peer.send(2, true, new byte[]{(byte) 0x80}); // Invalid push must not close the connection.
                 byte[] terminalGift = WireFixtures.gift(13, 456, 90, 3, false, true);
-                peer.send(2, true, WireFixtures.frame(true, true, WireFixtures.chat(1),
+                byte[] businessFrame = WireFixtures.frame(true, true, WireFixtures.chat(1),
                         WireFixtures.gift(11, 456, 90, 0, false), WireFixtures.gift(12, 456, 90, 3, true),
                         terminalGift, terminalGift, WireFixtures.gift(14, 456, 90, 3, false, true),
                         WireFixtures.gift(15, 789, 90, 1, false),
                         WireFixtures.envelope("WebcastMemberMessage", new WireFixtures().bytes(1, WireFixtures.common(20, 123))
                                 .bytes(2, WireFixtures.user(456)).build()),
                         WireFixtures.envelope("WebcastSocialMessage", new WireFixtures().bytes(1, WireFixtures.common(21, 123))
-                                .bytes(2, WireFixtures.user(456)).number(4, 1).build())));
+                                .bytes(2, WireFixtures.user(456)).number(4, 1).build()));
+                if (guest) {
+                    businessFrame = new WireFixtures().number(2, 91).text(6, "pb").text(7, "msg")
+                            .bytes(5, new WireFixtures().text(1, "compress_type").text(2, "gzip").build())
+                            .bytes(5, new WireFixtures().text(1, "im-internal_ext").text(2, "header-ack").build())
+                            .bytes(8, ProtoWire.parse(businessFrame).bytes(8)).build();
+                    peer.send(2, false, java.util.Arrays.copyOfRange(businessFrame, 0, 9));
+                    peer.send(0, true, java.util.Arrays.copyOfRange(businessFrame, 9, businessFrame.length));
+                } else peer.send(2, true, businessFrame);
                 await(() -> events.size() == 6);
                 assertEquals(List.of(LiveEvent.Type.COMMENT, LiveEvent.Type.GIFT, LiveEvent.Type.GIFT, LiveEvent.Type.GIFT,
                         LiveEvent.Type.ENTRANCE, LiveEvent.Type.FOLLOW), events.stream().map(LiveEvent::type).toList());
@@ -95,7 +103,10 @@ class NativeCollectorPipelineTest {
                 for (int index = 0; index < 8 && !(ping && ack); index++) {
                     var frame = peer.received.poll(2, TimeUnit.SECONDS); assertNotNull(frame);
                     ping |= frame.opcode() == 9;
-                    ack |= frame.opcode() == 2 && ProtoWire.parse(frame.bytes()).text(7).equals("ack");
+                    if (frame.opcode() == 2 && ProtoWire.parse(frame.bytes()).text(7).equals("ack")) {
+                        ack = true;
+                        assertEquals(guest ? "header-ack" : "synthetic-extension", ProtoWire.parse(frame.bytes()).text(8));
+                    }
                 }
                 assertTrue(ping && ack); peer.assertHealthy();
                 assertEquals(1, collector.diagnostics().count(MALFORMED));

@@ -83,7 +83,11 @@ public final class DouyinCollector extends AbstractCollector {
 
     private void consume(Run context, DouyinProtocol protocol, CollectorSocket socket,
                          CollectorSocket.Frame frame, String room) throws Exception {
-        if (!frame.receivedAt().plus(options.queueTtl()).isAfter(clock.instant())) { diagnostics().increment(EXPIRED); return; }
+        if (!frame.receivedAt().plus(options.queueTtl()).isAfter(clock.instant())) {
+            diagnostics().increment(EXPIRED);
+            diagnostics().inbound().record(InboundDiagnostics.Stage.QUEUE, InboundDiagnostics.Reason.TTL, null); return;
+        }
+        diagnostics().inbound().record(InboundDiagnostics.Stage.QUEUE, InboundDiagnostics.Reason.OK, null);
         DouyinProtocol.Batch batch;
         try { batch = protocol.decode(frame.bytes(), room); }
         catch (IOException | IllegalArgumentException exception) { diagnostics().error(MALFORMED, 0); return; }

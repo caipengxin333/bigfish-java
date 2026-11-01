@@ -49,7 +49,7 @@ public final class DouyinCollectorProbe {
         var collector = new DouyinCollector(new DouyinConnectionProvider() {
             @Override public DouyinConnection resolve(String room) throws Exception { return resolve(room, null); }
             @Override public DouyinConnection resolve(String room, String expectedRoom) throws Exception {
-                if (attempts.incrementAndGet() > 3) throw new DouyinFailure(ATTEMPT_LIMIT);
+                if (attempts.incrementAndGet() > config.maxAttempts) throw new DouyinFailure(ATTEMPT_LIMIT);
                 return provider.resolve(room, expectedRoom);
             }
         });
@@ -99,6 +99,10 @@ public final class DouyinCollectorProbe {
                     + " malformed=" + d.count(CollectorDiagnostics.Counter.MALFORMED)
                     + " reconnect=" + d.count(CollectorDiagnostics.Counter.RECONNECT) + " code=" + d.lastError());
             System.out.println(collector.resources() + " httpInFlight=" + provider.inFlightRequests() + " signingWorkers=" + provider.signingWorkers());
+            var inbound = d.inbound().snapshot();
+            inbound.counts().forEach((key, count) -> System.out.println("inbound=" + key + " count=" + count));
+            inbound.samples().forEach(sample -> System.out.println("inboundSample=" + sample));
+            System.out.println("inboundOmittedKeys=" + inbound.omittedKeys());
             if (interrupted) Thread.currentThread().interrupt();
         }
         // A successful handshake without an actual business message is not a successful receive verification.
@@ -122,7 +126,13 @@ public final class DouyinCollectorProbe {
             if (value != null) seconds = Integer.parseInt(value);
             if (seconds < 1 || seconds > 120) throw new IllegalArgumentException();
         } catch (IllegalArgumentException exception) { throw new DouyinFailure(PROBE_CONFIGURATION_INVALID); }
-        return new Config(room, action, seconds, credentialMode);
+        int maxAttempts = 3;
+        try {
+            String value = env.apply("BIGFISH_DOUYIN_PROBE_MAX_ATTEMPTS");
+            if (value != null) maxAttempts = Integer.parseInt(value);
+            if (maxAttempts < 1 || maxAttempts > 3) throw new IllegalArgumentException();
+        } catch (IllegalArgumentException exception) { throw new DouyinFailure(PROBE_CONFIGURATION_INVALID); }
+        return new Config(room, action, seconds, credentialMode, maxAttempts);
     }
     static WebDouyinConnectionProvider provider(Config config, Function<String, String> env,
                                                 DouyinSigner signer, DouyinRoomResolver resolver) throws DouyinFailure {
@@ -141,7 +151,7 @@ public final class DouyinCollectorProbe {
         credentials.validate(Instant.now());
         return credentials;
     }
-    record Config(String room, String action, int seconds, String credentialMode) {
+    record Config(String room, String action, int seconds, String credentialMode, int maxAttempts) {
         @Override public String toString() { return "ProbeConfig[redacted]"; }
     }
 }
