@@ -27,6 +27,6 @@
 - Live2D 模型及第三方采集代码要记录来源与许可证，不把“可下载”等同于可分发。未经确认不复制旧模型或 AGPL 签名脚本进新仓库。
 - 后端验证：`./scripts/maven.sh test`；前端：`cd frontend && npm ci && npm run build`。具体行为需要针对性测试。
 - 日志记录 error type、耗时和脱敏上下文，不打印 Cookie、签名 URL 或 Key。
-- 当前已集成显式 MOCK/DOUYIN 会话、DeepSeek/NLS、STATIC/RAM Token、任务诊断及舞台一键互动。DOUYIN 能力开放不代表接收通过；指定房间游客解析和握手已通过，但仍有 MALFORMED 解码错误，真实评论/礼物未验收。普通切后台不主动断开，冻结/失效后手动恢复同会话。会话集成见 docs/handoffs/phase6-integration.md，最新采集集成见 docs/handoffs/phase7-collector-integration.md；RAM 云端签发与长期后台稳定性未验收。须保留 c8be17c 的 PCM 转 WAV、停止/租约隔离及主窗口音频中断释放播放端修复。
+- 当前已集成显式 MOCK/DOUYIN 会话、DeepSeek/NLS、STATIC/RAM Token、任务诊断及舞台一键互动。DOUYIN 能力开放不等于所有真实场景验收；指定房间独立采集测试已收到 24 条评论、46 条入场和 22 条点赞，MALFORMED 为 0；真实礼物及主会话真实弹幕到语音播放的完整链路仍待验收。普通切后台不主动断开，冻结/失效后手动恢复同会话。会话集成见 docs/handoffs/phase6-integration.md，最新采集集成见 docs/handoffs/phase8-collector-integration.md；RAM 云端签发与长期后台稳定性未验收。须保留 c8be17c 的 PCM 转 WAV、停止/租约隔离、主窗口音频中断释放播放端修复，以及 4bbab80 的序列化/压缩分离、头部 ACK 和有界诊断回归。
 - 前端最新故障摘要修补见 docs/handoffs/failure-summary-ui.md；后续先同步 main，保留采集根因优先、同会话诊断证据及默认折叠的技术详情，不能把后续播放断开显示为首要故障。
 - 第六轮已整合后端故障一致性及前端恢复提示，最新验收见 docs/handoffs/phase6-integration.md。后续同步 main 后须保留终止根因优先、主动取消不计失败、同环节恢复证据，以及停止超时后新 STOPPED 快照解除旧提示的回归；公共 phase/recoveredAt 字段仍仅是提案。

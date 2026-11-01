@@ -1,8 +1,8 @@
 # 抖音采集适配器：原生签名与自动游客会话
 
-核查日期：2026-11-01。已内置 `NativeDouyinSigner` 与 `WebDouyinConnectionProvider.guest()`，并接入 `SessionService`。管理页保存数字网页房间号，明确选择 DOUYIN 后在舞台开始互动；自动获取游客 Cookie、访客 ID 与内部房间号。`bootstrap.capabilities.douyinCollector` 和 `providers.douyin.enabled` 表示启动能力已开放，不表示真实接收已验收。
+采集实现与实测更新：2026-11-02；下方官方路线说明沿用此前核查，本次未重新核查平台开放政策。已内置 `NativeDouyinSigner` 与 `WebDouyinConnectionProvider.guest()`，并接入 `SessionService`。管理页保存数字网页房间号，明确选择 DOUYIN 后在舞台开始互动；自动获取游客 Cookie、访客 ID 与内部房间号。`bootstrap.capabilities.douyinCollector` 和 `providers.douyin.enabled` 表示启动能力已开放，不表示所有真实接收场景已验收。
 
-**最新指定房间的 guest resolve 已返回 LIVE；随后 60 秒接收测试握手成功，但出现 92 次 MALFORMED，有效评论/礼物均为 0，真实消息接收仍未通过。** 采集窗口在房间 `440132407257` 上完成上述验证：resolve 发出 2 次 HTTP；receive 另发出 2 次 HTTP、1 次签名和 1 次 WSS 握手，停止后资源归零。详情见 [采集最新交接](../handoffs/collector.md) 与 [主窗口集成记录](../handoffs/phase7-collector-integration.md)。此结果不能推断房间现在仍在播，也不能把解码失败解释为没有观众发言。原 `PAGE_STRUCTURE_CHANGED` 的页面获取、空初始 store 与深度问题已修复；主会话不回退为 MOCK。
+**最新指定房间的独立采集测试已成功接收真实评论。** 2026-11-02，采集窗口在房间 `440132407257` 完成 guest resolve（LIVE，2 次 HTTP），随后一次 60 秒 receive 实际派发评论 **24**、入场 **46**、点赞 **22**，ACK **73**、MALFORMED **0**、重连 **0**；receive 发出 2 次 HTTP、1 次签名和 1 次 WSS 握手，停止后采集资源归零。**真实礼物为 0，礼物接收及主会话真实弹幕 → 模型 → 语音 → 舞台仍未验收。** 详情见 [采集最新交接](../handoffs/collector.md) 与 [主窗口集成记录](../handoffs/phase8-collector-integration.md)。此结果只属于当时指定房间，不保证现在仍在播或所有房间兼容。原页面初始化问题与本次确认的 `pb` 载荷误判均已修复；主会话不回退为 MOCK。历史 92 个错误包未保存，不能逐帧证明全部同因。
 
 保存、状态查询与应用启动不连接抖音，只有显式启动 DOUYIN 会话才连接。公开配置字段目前仅接收数字网页号；内部解析器支持规范链接不意味着配置接口接受任意 URL。`runtime.roomId` 为解析后内部号，解析前为空，不可与已保存网页号比较后认定串房。运行中配置变化不切换既有采集房间。
 
@@ -25,11 +25,13 @@
 - 解析器只请求 `https://live.douyin.com/` 及规范化的 `https://live.douyin.com/<网页房间号>`，所有 HTTP 重定向一律拒绝，无全局 Cookie jar、磁盘缓存、浏览器脚本执行或任意 URL 抓取入口。
 - HTTP 响应上限 2 MiB，包含整个响应体的总时限 10 秒；`stop` 中断等待后取消 HTTP future 并关闭其 HttpClient。
 - 页面仅支持脚本内的 JSON、`RENDER_DATA` 百分号编码 JSON、`self.__pace_f.push` JSON 字符串中的 `roomStore.roomInfo`。读取房间 `id_str/roomId`、主播 `id_str/nickname`、`room.status`，校验重复结果和可用的 `anchor.web_rid`。不使用“页面任意 roomId 正则”获取推荐房间。
-- 当前解析器约定 `room.status=2/4` 为直播/结束；不混用 `/web/enter` 的 `room_status`。这些页面形态与状态映射仅经人工夹具验证，**未用真实页面证实覆盖率**。关播页面缺内部 ID、状态未知、多个房间数据冲突均失败关闭，不能猜测。
+- 当前解析器约定 `room.status=2/4` 为直播/结束；不混用 `/web/enter` 的 `room_status`。指定房间的 LIVE 路径已实测；其他页面形态、真实关播与整体覆盖率仍未验收，不能用人工夹具代替线上覆盖率。关播页面缺内部 ID、状态未知、多个房间数据冲突均失败关闭，不能猜测。
 - 签名结果须匹配本次 nonce、内部 roomId、浏览器访客 ID；签发时间不能早于请求或晚于当前时刻，声明有效期最多 60 秒，握手前须至少剩余 5 秒。此检查不能证明上游接受签名。
 - WSS 仅接受现有允许的抖音 webcast 主机、443 与 `/webcast/im/push/v2/` 路径。握手被拒绝进入固定错误，避免凭据/签名失效无限重试。
 - 传输故障使用第一轮的 1～30 秒指数退避与抖动；短暂握手不清空退避。用户 stop 后不再重连；关播控制或房间解析结束使 `state=ENDED`；同网页房间内部 roomId 改变时，先结束旧会话，不为新房间签名或连接。
 - 礼物至少 1、同组累计转增量、重复包去重、不同用户隔离、异常包隔离保留原实现；采集/ACK/心跳不等待业务回调。
+- 入站先重组有界二进制分片，再解码 PushFrame；`payload_encoding=pb` 表示 Protobuf 序列化，压缩方式独立读取 `compress_type` 头，支持 gzip/identity 并保留旧 gzip 标记及魔数兼容。冲突、未知编码、坏 gzip 或解压超限继续拒绝。ACK 优先回显本帧 `im-internal_ext` 头；无该头时仅在 Response 要求 ACK 时回显其 internal_ext，仍要求有效 logId。单条坏消息被隔离，保留同批有效消息和有效 ACK。
+- 内部诊断区分分片、队列、封装、解压、Response、ACK、消息及归一化阶段，仅保留固定标签与数字结构；上限为 128 个计数键、64 个摘要，每个阶段/原因最多 3 份、每份最多 12 个字段形状。只在独立 probe 输出，不新增 REST 字段，不保存正文、用户标识、凭据或原帧。
 
 ## 支持的输入
 
@@ -63,6 +65,7 @@ Cookie 只接受固定平台首页/房间响应中的 `ttwid`，限制值长度�
 | `BIGFISH_DOUYIN_ROOM` | 当前规范链接/网页房间号 |
 | `BIGFISH_DOUYIN_PROBE_ACTION` | 显式 `resolve` 或 `receive` |
 | `BIGFISH_DOUYIN_PROBE_SECONDS` | 默认 60 秒，允许 1～120；真实首次验收使用 60 秒 |
+| `BIGFISH_DOUYIN_PROBE_MAX_ATTEMPTS` | 默认 3，允许 1～3；限制每次 receive 的实际解析/连接尝试，本次实测显式设为 1 |
 | `BIGFISH_DOUYIN_SIGNER_REVIEWED` | `receive` 须为 `true`，表示已核对 signer 来源；保留上一轮执行保护 |
 | `BIGFISH_DOUYIN_CREDENTIAL_MODE` | 默认 `guest`；只有显式 `external` 才读取下面四项 |
 
@@ -85,7 +88,7 @@ Cookie 只接受固定平台首页/房间响应中的 `ttwid`，限制值长度�
 
 `NativeDouyinSigner` 从本次 roomId、浏览器访客 ID、UA 与当前时间构造 WSS 查询串，13 个字段按固定顺序参与签名；SDK 版本为 `1.0.15`。签名值中的 `+` 等字符按 URL 编码，避免被解码为空格。返回的 30 秒有效期是本地新鲜度预算，并非平台签发的过期时间。重连重新取页面、凭据、nonce 和时间并签名，不重复使用缓存 URL。整个实现仅用已有 Java 21 标准库，无新增 POM 依赖、Node/浏览器/Go 辅助服务。
 
-**当前连接引导与实测边界**：上游会尝试 IM fetch 获取服务端 cursor/push server，也保留了历史 cursor/wrds_v 回退。本实现未实现 HTTP A-Bogus/IM fetch，不复制历史 cursor/wrds_v；初次 WSS 使用空 cursor、由当前 roomId/访客/时间生成的 internal_ext，以及已允许的 `webcast100-ws-web-lf.douyin.com` 主机。没有凭空填写屏幕尺寸或浏览器平台。指定房间已接受一次初始握手，但后续入站数据报 MALFORMED，尚不能判定具体封装、压缩或字段差异。若握手被拒绝，不自动轮换主机、绕过挑战或降级成旧签名；先按固定错误停止并重新评估 bootstrap。**握手通过不等于消息解码或实际业务接收通过。**
+**当前连接引导与实测边界**：上游会尝试 IM fetch 获取服务端 cursor/push server，也保留了历史 cursor/wrds_v 回退。本实现未实现 HTTP A-Bogus/IM fetch，不复制历史 cursor/wrds_v；初次 WSS 使用空 cursor、由当前 roomId/访客/时间生成的 internal_ext，以及已允许的 `webcast100-ws-web-lf.douyin.com` 主机。没有凭空填写屏幕尺寸或浏览器平台。指定房间已接受初始握手，并在分离 `pb` 序列化和 gzip 压缩后收到真实评论；本次 60 秒观察没有出现重连，不能推广为长期稳定或全房间兼容。若握手被拒绝，不自动轮换主机、绕过挑战或降级成旧签名；先按固定错误停止并重新评估 bootstrap。**握手通过不等于消息解码或主会话完整链路通过，须分别看实际事件与下游结果。**
 
 `DouyinSigners.load()` 通过已注册的 `META-INF/services/cn.bigfish.collector.DouyinSigner` 加载唯一实现，默认就是 `NativeDouyinSigner`，无需外置 signer JAR。ServiceLoader 无实现、多个候选、坏类名或构造失败均转为固定错误；多候选时不执行构造函数。如需替换，集成必须显式注入选定实现或调整发行物中的唯一注册，不能简单叠加第二个 SPI JAR。
 
@@ -103,7 +106,7 @@ Cookie 只接受固定平台首页/房间响应中的 `ttwid`，限制值长度�
 
 先选择 `resolve`：默认游客模式最多抓取首页和房间页面各一次，输出状态与 `roomResolved`，不打印房间/主播/访客信息。`receive` 使用内置且唯一的原生 ServiceLoader 实现，仍需显式 `BIGFISH_DOUYIN_SIGNER_REVIEWED=true`。未启用开关、缺房间、非法模式、external 模式缺凭据或 SPI 配置异常均在联网前终止。没有额外 JAR、脚本或浏览器安装步骤。
 
-每次 `receive` 最多 3 次实际 Provider 解析/连接尝试：游客模式最多 6 次 HTTP、3 次签名/握手（遇永久错误立即停止）。默认 60 秒后 stop，最多等待 2 秒观察资源释放。只发送协议所需的 ACK/Ping/Pong/心跳，无发评论、点赞、关注或送礼接口。输出均为固定状态/计数：实际 HTTP 请求数、签名次数、WSS 握手尝试数、连接数、总耗时、评论/礼物/关注/进场/点赞数、礼物增量总数、ACK/心跳/重复/异常/重连数和最后错误码。HTTP 计数是发起请求数，不是服务端确认处理数；resolve 与 receive 的每次运行单独汇总。业务内容、用户标识、Cookie、签名 URL 和原始帧均不输出。
+每次 `receive` 按 `BIGFISH_DOUYIN_PROBE_MAX_ATTEMPTS` 限制为 1～3 次实际 Provider 解析/连接尝试：默认最多 3 次，游客模式上限为 6 次 HTTP、3 次签名/握手（遇永久错误立即停止）。默认 60 秒后 stop，最多等待 2 秒观察资源释放。只发送协议所需的 ACK/Ping/Pong/心跳，无发评论、点赞、关注或送礼接口。输出为固定状态/计数及有界结构摘要：实际 HTTP 请求数、签名次数、WSS 握手尝试数、连接数、总耗时、评论/礼物/关注/进场/点赞数、礼物增量总数、ACK/心跳/重复/异常/重连数、最后错误码及上述内部诊断。HTTP 计数是发起请求数，不是服务端确认处理数；resolve 与 receive 的每次运行单独汇总。业务内容、用户标识、Cookie、签名 URL 和原始帧均不输出。
 
 终止报告保留 stop 前 `terminal` 和 stop 后 `STOPPED`。资源报告包括本采集器 source/dispatch 线程、业务队列、附着传输句柄、HTTP 在途请求和签名 worker；不把这些数当作 JVM 全部线程数。JDK 网络传输 close 会取消握手、abort socket、清空入站队列并 shutdownNow 客户端。已有业务回调必须响应中断，无法强制终止不合作的调用者代码。
 
