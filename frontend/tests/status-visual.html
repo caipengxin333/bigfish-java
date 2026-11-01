@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>故障摘要布局验收</title>
+<style>body{margin:16px;background:#e8efec;font:14px system-ui}iframe{display:block;border:1px solid #91afa3;margin:12px 0 24px;max-width:100%}output{display:block;margin:16px 0}</style>
+<h1>故障摘要 · 仅本地夹具</h1><p>实际 Vue 页面；所有 HTTP、WebSocket、音频为替身，未接入真实服务。</p>
+<button id="check">检查所有窗口宽度</button><output id="result">等待加载</output>
+<h2>舞台合成失败 · 375px</h2><iframe title="375px 舞台" width="375" height="1050" src="/tests/status-fixture.html?scenario=speech"></iframe>
+<h2>管理页模型超时 · 375px</h2><iframe title="375px 管理页" width="375" height="1050" src="/tests/status-fixture.html?scenario=model&page=admin"></iframe>
+<h2>采集根因 · 桌面</h2><iframe title="桌面舞台" width="1120" height="1050" src="/tests/status-fixture.html?scenario=collector"></iframe>
+<script>
+const check = () => { document.getElementById('result').textContent = [...document.querySelectorAll('iframe')].map(frame => { const doc = frame.contentDocument.documentElement; return `${frame.title}: ${doc.clientWidth}/${doc.scrollWidth} ${doc.scrollWidth <= doc.clientWidth ? 'PASS' : 'FAIL'}` }).join('；') }
+document.getElementById('check').onclick = check
+window.addEventListener('load', check)
+</script></html>

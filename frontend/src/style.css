@@ -534,3 +534,8 @@ meter {
   .health-steps { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .health-summary { padding:16px; }
 }
+
+.health-actions:empty { display:none; }
+.health-actions { margin-top:12px; }
+.health-summary { overflow-wrap:anywhere; }
+#configuration { scroll-margin-top:24px; }

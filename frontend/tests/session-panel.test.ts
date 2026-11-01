@@ -25,8 +25,9 @@ const compiled = ts.transpileModule(script.content, { compilerOptions: { target:
     ? urlFor(shim) : specifier.startsWith('.') ? new URL(specifier, componentUrl).href : import.meta.resolve(specifier))}`)
 const Panel = (await import(urlFor(compiled))).default
 
-async function render(data = structuredClone({ ...fixtures }), compact = false) {
+async function render(data = structuredClone({ ...fixtures }), compact = false, readFailure = false) {
   const fetcher = (async (url: string) => {
+    if (readFailure) return Response.json({}, { status: 503 })
     const routes = { '/runtime': data.runtime, '/runtime/diagnostics': { ...data.diagnostics, sessionId: data.runtime.sessionId, state: data.runtime.state },
       '/config': data.snapshot, '/bootstrap': data.bootstrap, '/providers': data.providers }
     const key = url.replace('/api/v1', '') as keyof typeof routes
@@ -74,4 +75,26 @@ test('failed collection has a plain-language summary before collapsed technical 
   assert.ok(html.indexOf('抖音采集失败') < html.indexOf('<details'))
   assert.ok(html.indexOf('状态详情与错误码') < html.indexOf('PAGE_STRUCTURE_CHANGED'))
   assert.doesNotMatch(html, /<details[^>]* open/)
+})
+
+test('unrecovered synthesis failure and recovery are visible in the actual admin summary', async () => {
+  const data = structuredClone({ ...fixtures })
+  data.runtime = { ...data.runtime, sessionId: 'current', state: 'RUNNING', player: { ...data.runtime.player, ready: true, connected: true } }
+  data.diagnostics.lastFailure = { sequence: 2, taskId: 'task', eventType: 'COMMENT', stage: 'FAILED', reason: 'SPEECH_FAILED',
+    at: '2026-11-01T09:59:59Z', configVersion: 1, previousStageMs: 10, taskElapsedMs: 20 }
+  let html = (await render(data)).html
+  assert.match(html, /最近一次语音合成失败，互动仍在运行/)
+  assert.ok(html.indexOf('语音合成失败') < html.indexOf('<details'))
+  assert.match(html, /href="#configuration">检查管理配置/)
+  assert.doesNotMatch(html, /互动已就绪，等待消息/)
+  data.diagnostics.lastSpeechSuccessAt = data.diagnostics.capturedAt
+  html = (await render(data)).html
+  assert.match(html, /互动已就绪，等待消息/)
+  assert.ok(html.indexOf('状态详情与错误码') < html.indexOf('语音合成此前失败'))
+  assert.doesNotMatch(html, /<details[^>]* open/)
+})
+test('failed reads render one actionable summary without stale success or duplicate error boxes', async () => {
+  const { html } = await render(structuredClone({ ...fixtures }), false, true)
+  assert.match(html, /暂时无法确认运行状态/); assert.match(html, />刷新状态</)
+  assert.doesNotMatch(html, /互动已就绪|运行状态读取失败|<details[^>]* open/)
 })
