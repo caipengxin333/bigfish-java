@@ -1,5 +1,7 @@
 # 第三方来源与许可
 
+本项目原创代码采用 [Apache License 2.0](LICENSE)。下列第三方组件保留各自的许可证和版权声明；外部依赖、Live2D 模型与 SDK 不因项目许可证而改变授权范围。
+
 ## 抖音 Webcast 原生签名核心
 
 - 来源：jwwsjlm/douyinLive，固定 revision `af34f7c2ea2c4df90c6f4659e967fb31815d9255`。
