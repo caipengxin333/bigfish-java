@@ -10,7 +10,11 @@ import static cn.bigfish.collector.DouyinFailure.Code.*;
 
 /** Independent guest bootstrap. Each attempt owns its cookie/visitor data; no disk or cross-session cache. */
 final class DouyinGuestSession {
-    static final String USER_AGENT = "Mozilla/5.0 (compatible; BigFishCollector/0.1; Java/21)";
+    // Fixed desktop page compatibility profile, with our own identity retained. The generic Java profile
+    // receives an empty HTTP 200 room response. Use this same value for bootstrap, signing and WSS;
+    // no UA rotation, fabricated platform/screen fields, script execution or challenge fallback.
+    static final String USER_AGENT = "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) "
+            + "Chrome/120.0.0.0 Safari/537.36 BigFishCollector/0.1";
     private static final URI HOME = URI.create("https://live.douyin.com/");
     private final DouyinRoomResolver resolver;
     private final Clock clock;

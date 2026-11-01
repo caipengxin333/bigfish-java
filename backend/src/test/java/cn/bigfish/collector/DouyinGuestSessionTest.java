@@ -139,6 +139,26 @@ class DouyinGuestSessionTest {
         }
     }
 
+    @Test void deepUnrelatedHydrationDoesNotHideTheExplicitVisitor() throws Exception {
+        String json = "{\"user_unique_id\":\"9001\",\"display\":" + "[".repeat(30) + "0" + "]".repeat(30) + "}";
+        String html = "<script>self.__pace_f.push(" + new ObjectMapper().writeValueAsString(List.of(1, "1:" + json)) + ")</script>";
+        assertEquals("9001", DouyinRoomPage.guestId(html));
+        assertEquals(PAGE_STRUCTURE_CHANGED, assertThrows(DouyinFailure.class,
+                () -> DouyinRoomPage.guestId(html + guestPage("9002"))).code());
+        assertEquals(GUEST_ID_MISSING, assertThrows(DouyinFailure.class,
+                () -> DouyinRoomPage.guestId(html.replace("user_unique_id", "unrelated_id"))).code());
+    }
+
+    @Test void visitorHydrationStillRejectsExcessiveNestingAndGatePages() {
+        String html = "<script>{\"user_unique_id\":\"9001\",\"display\":" + "[".repeat(70) + "0" + "]".repeat(70) + "}</script>";
+        var failure = assertThrows(DouyinFailure.class, () -> DouyinRoomPage.guestId(html));
+        assertEquals(PAGE_STRUCTURE_CHANGED, failure.code()); assertNull(failure.getCause());
+        assertEquals(CHALLENGE_REQUIRED, assertThrows(DouyinFailure.class,
+                () -> DouyinRoomPage.guestId("<title>安全验证 - 抖音</title>" + html)).code());
+        assertEquals(AUTH_REQUIRED, assertThrows(DouyinFailure.class,
+                () -> DouyinRoomPage.guestId("<title>登录抖音</title>" + html)).code());
+    }
+
     @Test void endedOrChangedRoomNeedsNoVisitorAndNeverSigns() throws Exception {
         for (boolean changed : List.of(false, true)) {
             String html = DouyinRoomResolverTest.fixture(changed ? "live" : "ended");
@@ -147,6 +167,18 @@ class DouyinGuestSessionTest {
             var provider = WebDouyinConnectionProvider.guest(new NativeDouyinSigner(), resolver, Clock.systemUTC());
             var result = provider.resolve("123456", changed ? "7000000000000000002" : null);
             assertTrue(result.ended); assertEquals(0, provider.signingAttempts()); assertEquals(2, provider.requestsStarted());
+        }
+    }
+
+    @Test void emptyHttp200RoomDoesNotClaimEndedOrAuthenticationRequired() throws Exception {
+        for (String type : List.of("", "application/json", "text/html")) {
+            var resolver = new DouyinRoomResolver(Clock.systemUTC(), (uri, headers) -> uri.getPath().equals("/")
+                    ? home("ttwid=synthetic") : new DouyinRoomResolver.Page(200, type, ""));
+            var provider = WebDouyinConnectionProvider.guest(new NativeDouyinSigner(), resolver, Clock.systemUTC());
+            var failure = assertThrows(DouyinFailure.class, () -> provider.resolve("123456"));
+            assertEquals(PAGE_STRUCTURE_CHANGED, failure.code()); assertNull(failure.getCause());
+            assertEquals(2, provider.requestsStarted()); assertEquals(0, provider.inFlightRequests());
+            assertEquals(0, provider.signingAttempts());
         }
     }
 
