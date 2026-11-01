@@ -60,7 +60,7 @@ public final class RuntimeEngine implements EventIngress {
     private Job modelJob, speechJob;
     private Future<?> modelCall, speechCall;
     private Instant modelUntil, speechUntil, lastWelcome = Instant.MIN;
-    private boolean closed;
+    private boolean closed, terminalError;
 
     public RuntimeEngine(ConfigStore configs, ConversationPort mock, Supplier<ConversationPort> realFactory,
                          SpeechPort speech, PlaybackCoordinator playback, AudioAssets assets, Clock clock,
@@ -81,17 +81,20 @@ public final class RuntimeEngine implements EventIngress {
                                      SpeechPort selectedSpeech, String selectedSpeechMode) {
         if (closed || (state != State.STOPPED && state != State.FAILED)) throw new IllegalStateException("SESSION_ACTIVE");
         state = State.STARTING;
-        conversation = null;
+        conversation = null; terminalError=false; lastError=""; lastErrorAt="";
+        sessionId = UUID.randomUUID().toString(); mode = selectedMode.name();
+        roomId = selectedMode == StartSessionRequest.Mode.MOCK ? "mock-room" : "";
+        conversationMode = useDeepSeek ? "DEEPSEEK" : "MOCK"; speechMode=selectedSpeechMode;
         try {
+            // Even an allocation failure belongs to this attempt, never to the previous session.
+            recent.clear(); playback.begin(sessionId);
             conversation = useDeepSeek ? realFactory.get() : mock;
-            speech=Objects.requireNonNull(selectedSpeech); speechMode=selectedSpeechMode; lastError=""; lastErrorAt="";
-            conversationMode = useDeepSeek ? "DEEPSEEK" : "MOCK";
-            sessionId = UUID.randomUUID().toString(); mode = selectedMode.name();
-            roomId = selectedMode == StartSessionRequest.Mode.MOCK ? "mock-room" : "";
+            speech=Objects.requireNonNull(selectedSpeech);
             appliedVersion = configs.snapshot().version(); lastWelcome = Instant.MIN;
-            recent.clear(); playback.begin(sessionId); state = State.RUNNING;
+            state = State.RUNNING;
             return sessionId;
         } catch (RuntimeException error) {
+            recordTerminalError("PROVIDER_UNAVAILABLE"); failures++;
             stop(sessionId); // Also close a model allocated before a later startup step failed.
             state = State.FAILED; throw new IllegalStateException("PROVIDER_UNAVAILABLE");
         }
@@ -106,8 +109,9 @@ public final class RuntimeEngine implements EventIngress {
     }
     public synchronized void collectorFailed(String id) {
         if (!sessionId.equals(id) || state != State.RUNNING) return;
+        recordTerminalError("COLLECTOR_FAILED");
         stop(id);
-        state = State.FAILED; lastError = "COLLECTOR_FAILED"; lastErrorAt = clock.instant().toString();
+        state = State.FAILED;
         failures++;
     }
     public synchronized void stop(String id) {
@@ -118,7 +122,7 @@ public final class RuntimeEngine implements EventIngress {
         playback.stop("SESSION_STOPPED");
         ConversationPort retiringConversation=conversation; conversation=null;
         if (retiringConversation instanceof AutoCloseable closeable) {
-            try { closeable.close(); } catch (Exception ignored) { lastError="MODEL_CLOSE_FAILED"; lastErrorAt=clock.instant().toString(); }
+            try { closeable.close(); } catch (Exception ignored) { recordError("MODEL_CLOSE_FAILED"); }
         }
         state = State.STOPPED;
     }
@@ -185,7 +189,7 @@ public final class RuntimeEngine implements EventIngress {
     public synchronized void tick() {
         try { advance(); }
         catch (RuntimeException error) {
-            lastError="RUNTIME_FAILED"; lastErrorAt=clock.instant().toString();
+            recordTerminalError("RUNTIME_FAILED");
             failures++; log.warn("runtime_failure type={} sessionId={}", error.getClass().getSimpleName(),sessionId);
             stop(sessionId); state = State.FAILED;
         }
@@ -294,20 +298,25 @@ public final class RuntimeEngine implements EventIngress {
     private synchronized void failed(String type, Job job, Exception error) {
         if (type.equals("MODEL") ? modelJob!=job : speechJob!=job) return;
         if (!valid(job)) { trace(job,Stage.CANCELLED,invalidReason(job)); return; }
-        if (!job.failed().compareAndSet(false,true)) return;
-        failures++;
-        lastError=type+"_FAILED"; lastErrorAt=clock.instant().toString();
+        if (job.failed().get()) return;
+        String code=type+"_FAILED";
         Reason reason=type.equals("MODEL") ? Reason.MODEL_FAILED : Reason.SPEECH_FAILED;
         Throwable cause=error;
         for(int depth=0;cause!=null && depth<8;depth++,cause=cause.getCause()) {
-            if(cause instanceof cn.bigfish.conversation.DeepSeekFailure known) { lastError="MODEL_"+known.diagnostic().code().name(); break; }
-            if(cause instanceof cn.bigfish.speech.SpeechFailure known) { lastError="NLS_"+known.code().name(); break; }
-            if(cause instanceof TimeoutException) { lastError=type+"_OVERALL_TIMEOUT"; reason=Reason.OVERALL_TIMEOUT; break; }
-            if(cause instanceof EmptyModelReply) { lastError="MODEL_EMPTY_OUTPUT"; reason=Reason.MODEL_EMPTY_OUTPUT; break; }
+            if(cause instanceof cn.bigfish.conversation.DeepSeekFailure known) { code="MODEL_"+known.diagnostic().code().name(); break; }
+            if(cause instanceof cn.bigfish.speech.SpeechFailure known) { code="NLS_"+known.code().name(); break; }
+            if(cause instanceof TimeoutException) { code=type+"_OVERALL_TIMEOUT"; reason=Reason.OVERALL_TIMEOUT; break; }
+            if(cause instanceof EmptyModelReply) { code="MODEL_EMPTY_OUTPUT"; reason=Reason.MODEL_EMPTY_OUTPUT; break; }
             if(cause instanceof CancellationException || cause instanceof InterruptedException) reason=Reason.PROVIDER_CANCELLED;
         }
         if(cause instanceof cn.bigfish.conversation.DeepSeekFailure known) reason=providerReason(known.diagnostic().code().name(),reason);
         if(cause instanceof cn.bigfish.speech.SpeechFailure known) reason=providerReason(known.code().name(),reason);
+        if (!job.failed().compareAndSet(false,true)) return;
+        if (reason==Reason.PROVIDER_CANCELLED) {
+            // Seal the task outcome so cancellation/release callbacks cannot turn it into a failure.
+            trace(job,Stage.CANCELLED,reason); return;
+        }
+        failures++; recordError(code);
         trace(job,Stage.FAILED,reason);
         log.warn("task_failure type={} errorType={} taskId={} elapsedMs={}",type,error.getClass().getSimpleName(),
             job.id(),Duration.between(job.event().receivedAt(),clock.instant()).toMillis());
@@ -350,10 +359,16 @@ public final class RuntimeEngine implements EventIngress {
         catch (RuntimeException ignored) {
             synchronized (this) {
                 // Cleanup failures must not abort the rest of stop or overwrite a newer session.
-                if (!sessionId.equals(job.event().sessionId()) || !job.failed().compareAndSet(false,true)) return;
-                failures++; lastError=type+"_CANCEL_FAILED"; lastErrorAt=clock.instant().toString();
+                if (!sessionId.equals(job.event().sessionId()) || terminalError || !job.failed().compareAndSet(false,true)) return;
+                failures++; recordError(type+"_CANCEL_FAILED");
             }
         }
+    }
+    private void recordError(String code) {
+        if (!terminalError) { lastError=code; lastErrorAt=clock.instant().toString(); }
+    }
+    private void recordTerminalError(String code) {
+        recordError(code); terminalError=true;
     }
     public synchronized Status status() {
         return new Status(sessionId,state,mode,conversationMode,speechMode,configs.snapshot().version(),appliedVersion,

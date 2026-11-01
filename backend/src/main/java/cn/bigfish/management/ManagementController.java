@@ -22,7 +22,7 @@ public class ManagementController {
     @GetMapping("/bootstrap")
     public Map<String,Object> bootstrap() {
         return Map.of("application", "BigFish Java", "version", "0.1.0-SNAPSHOT", "mode", "READY",
-            "sessionState", runtime.status().state().name(), "capabilities", Map.of("configPersistence", true,
+            "sessionState", sessions.status().state(), "capabilities", Map.of("configPersistence", true,
             "douyinCollector", true, "conversation", true, "speech", providers.status().aliyun().enabled(), "playback", true,
             "mockMode", true, "localTestSpeech", true));
     }
@@ -35,7 +35,7 @@ public class ManagementController {
     @GetMapping("/runtime") public RuntimeView status() { return sessions.status(); }
     /** Fixed latest-20 window; polling only reads local state and never calls a supplier. */
     @GetMapping("/runtime/diagnostics") public RuntimeDiagnosticsView diagnostics() {
-        var view=runtime.diagnostics(); var trace=view.trace();
+        var view=sessions.diagnostics(); var trace=view.trace();
         var recent=trace.history().stream().skip(Math.max(0,trace.history().size()-20)).map(ManagementController::traceView).toList();
         return new RuntimeDiagnosticsView(trace.sessionId(),view.runtime().state().name(),trace.capturedAt(),
             view.waiting().stream().map(Enum::name).toList(),trace.lastReceivedAt(),trace.lastModelSuccessAt(),
