@@ -219,3 +219,15 @@ test('unknown error keys cannot access object prototypes or break safe summary r
     assert.match(h.title, /采集失败/); assert.doesNotMatch(JSON.stringify(h), /constructor|__proto__|toString/)
   }
 })
+
+test('a refreshed STOPPED state resolves an earlier uncertain stop request', () => {
+  const { r, d } = running()
+  const issue = { action: 'stop' as const, kind: 'timeout', code: '', sessionId: r.sessionId }
+  assert.match(sessionHealth(r, d, undefined, '', issue).title, /停止结果尚未确认/)
+  r.state = d.state = 'STOPPED'; r.collector.state = 'STOPPED'
+  r.player.ready = r.player.connected = false
+  const h = sessionHealth(r, d, undefined, '', issue)
+  assert.equal(h.title, '互动已停止')
+  assert.equal(h.tone, 'neutral'); assert.equal(h.blocking, false)
+  assert.doesNotMatch(h.detail + h.next, /停止.*未确认/)
+})

@@ -97,7 +97,7 @@
 
 当前 NLS 输入上限为 300 个 UTF-16 字符，主会话音频上限为 25 秒，超限会报错。模型调用整体期限为 20 秒，语音合成为 10 秒，重试受同一个期限约束。模型与语音失败分别展示错误码。
 
-如果没有声音，可在管理页或舞台查看“当前阶段”和最近模型、合成、播放成功时间；管理页可展开最近任务阶段。诊断区分没有消息、播放端未就绪、模型/语音等待、播放等待与取消后仍忙的工作线程。历史错误与当前等待状态分别显示，详细轨迹只保留有限条数和 5 分钟，不是永久日志。
+如果没有声音，先看管理页或舞台顶部的故障摘要和下一步操作；采集、模型、合成与播放状态分开展示。单条任务失败时会话可能仍在运行，后续同环节成功后，故障转为折叠区的历史记录。详细错误码、最近任务阶段及成功时间可在诊断区展开；详细轨迹只保留有限条数和 5 分钟，不是永久日志。
 
 详细说明：[DeepSeek](docs/providers/deepseek.md) · [阿里云 NLS](docs/providers/aliyun-nls.md) · [抖音采集限制](docs/providers/douyin.md)。
 
@@ -171,7 +171,7 @@ npm run build
 - 接口与协议：[HTTP API](docs/openapi.yaml)（包含只读 `/api/v1/runtime/diagnostics`）、[事件格式](docs/event-schema.md)、[播放协议](docs/playback-protocol.md)。
 - 运行排查：[运行稳定性与诊断](docs/runtime-stability.md)。
 - 设计与前端：[架构设计](docs/architecture.md)、[前端与舞台](frontend/README.md)。
-- 开发协作：[任务边界与合并](docs/task-boundaries.md)、[第四/五轮集成记录](docs/handoffs/phase5-integration.md)。
+- 开发协作：[任务边界与合并](docs/task-boundaries.md)、[最新集成记录](docs/handoffs/phase6-integration.md)。
 - 历史记录：[交接记录](docs/handoffs/)、[验证记录](docs/validation.md)。这些文档保留对应阶段的背景与验收结果，具体改动可查 Git 提交历史。
 
 ## 许可证与素材

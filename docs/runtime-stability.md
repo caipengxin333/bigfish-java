@@ -1,10 +1,10 @@
 # 运行诊断与故障恢复
 
-更新于 2026-11-01。本轮在既有调度、DeepSeek、NLS 和播放链路上增加内部诊断，不新增 REST/公共 DTO，不改变默认服务选择。真实服务基本联调结果沿用 [第二轮集成交接](handoffs/phase2-integration.md)；本轮只运行本地替身，不重复付费验证。
+更新于 2026-11-01。当前已通过 `GET /api/v1/runtime/diagnostics` 提供有界任务诊断，并在管理页和舞台显示故障摘要。第六轮统一会话根因、任务取消与恢复提示，没有新增公共字段或改变默认服务选择。真实服务基本联调结果沿用 [第二轮集成交接](handoffs/phase2-integration.md)；最新本地验证见 [第六轮集成交接](handoffs/phase6-integration.md)。
 
 ## 先定位停在哪个阶段
 
-主窗口可调用 `RuntimeEngine.diagnostics()` 获取只读 `DiagnosticsView`。轮询此方法不会触发模型、TTS 或供应商目录请求。现有 `status()`、RuntimeView 和 API 均保持原签名。
+页面通过诊断 HTTP 接口读取当前会话；Java 内部由 `SessionService.diagnostics()` 先协调已发生的采集终态，再返回 `RuntimeEngine.DiagnosticsView`。状态读取可能收尾已失败或结束的会话，但不会启动采集、探测连接或调用模型、TTS、Token 服务。runtime 与 diagnostics 是独立快照，展示时必须匹配 sessionId 和 state。
 
 | 观察项 | 可以说明什么 | 下一步 |
 | --- | --- | --- |
@@ -20,12 +20,16 @@
 | DROPPED/CANCELLED + TASK_EXPIRED | 已到任务 TTL | 检查前面等待时间；过期不继续播放 |
 | STOPPED | 引擎未运行 | 查 runtime.state；显式启动新会话并重新获得播放租约 |
 
-`waiting` 是同时成立的提示列表，例如 PLAYER_NOT_READY 与 MODEL_WAIT 可以同时出现。它不覆盖最近失败，旧错误也不代表当前任务仍失败。lastError 是已有接口的最近模型/合成错误，成功不会抹掉它；判断是否恢复应看更新的阶段成功时间和 COMPLETED。
+`waiting` 是同时成立的提示列表，例如 PLAYER_NOT_READY 与 MODEL_WAIT 可以同时出现。它不覆盖最近失败，旧错误也不代表当前任务仍失败。`lastError` 保留本会话最近引擎错误；采集、运行或启动故障终止会话后，固定该根因和时间，后续清理异常不得覆盖。成功不会抹掉历史错误，新会话重置。
+
+单任务模型、合成或播放失败不等于会话停止。`lastFailure` 是最多保留 5 分钟的历史失败；只有同会话、同环节的后续成功证据才能说明该环节之后成功过，不能据此宣布整条链路恢复。一般原因码需要同任务阶段记录辅助定位；轨迹裁剪后可能无法确认环节。目录检查、Token 可用、播放 ready 和其他环节成功均不能证明故障恢复。主动取消记为 CANCELLED，不增加模型/合成失败计数。
+
+管理页和舞台优先说明采集根因；技术详情与已恢复历史默认折叠。停止请求曾超时但刷新已确认 STOPPED 时，显示“互动已停止”，不继续把旧请求错误当作当前停止结果。
 
 ## 内部数据与读取示例
 
 ```java
-var view = runtimeEngine.diagnostics();
+var view = sessionService.diagnostics();
 var current = view.runtime();                 // 原内部 Status 的副本
 var waits = view.waiting();                   // 固定枚举，多项可共存
 var modelWorker = view.modelWorker();         // threads / active / queued / completed
@@ -102,7 +106,7 @@ RECEIVED → MODEL_WAIT → MODEL_STARTED → MODEL_COMPLETED → SPEECH_WAIT �
 
 建议一次批准的基准运行：30 分钟，最多 30 条短评论、30 条礼物；只用合成测试文本，不收真实观众隐私。每条评论 maxOutputTokens≤128，人设要求一两句。先由预算决定间隔，最多每分钟各一条；失败不补发、不无限重试。舞台保持前台、唯一播放器 READY。第 10 分钟人为断开/重新连接，第 20 分钟停止并显式新开会话，第 30 分钟停止；断开期间跳过注入，不事后补齐额度。429/5xx/永不完成故障仍留给本地替身，不能向真实服务故意制造故障洪泛。
 
-每 5 秒读取诊断摘要，在本机受限日志中记录时间、session/task ID、阶段、固定原因、队列深度、最老任务年龄、三种最近成功时间、工作线程 active/queued/completed、音频/文件数量、诊断淘汰次数；完整最近轨迹只在出现异常时取样。导出文件另设上限（例如每次运行一个最多 10MiB 文件，到限停止记录并结束测试），不持久化正文/昵称/Key/完整 HTTP。当前仅有内部 Java 方法，HTTP 接口需主窗口批准实现；不要假设本分支已有诊断 URL。
+每 5 秒读取诊断摘要，在本机受限日志中记录时间、session/task ID、阶段、固定原因、队列深度、三种最近成功时间、工作线程 active/queued/completed、音频/文件数量、诊断淘汰次数；完整最近轨迹只在出现异常时取样。最老任务年龄等内部指标需在 Java 内取样，不能假设 HTTP 已提供。导出文件另设上限（例如每次运行一个最多 10MiB 文件，到限停止记录并结束测试），不持久化正文/昵称/Key/完整 HTTP。HTTP 诊断只返回最近最多 20 条阶段记录。
 
 同时由外部进程观测 RSS、JVM 线程/打开连接数、CPU、当前工作树音频目录的文件数/总字节，每分钟取样；不要用包含环境变量的进程详情命令导出凭据。统计模型/合成/播放等待 p50/p95、FAILED 和过期率、最长没有 COMPLETED 的时间、恢复后首次 COMPLETED 用时。详细历史只有 5 分钟，长测需要有界摘要采样，不能靠事后一次快照还原全程。
 

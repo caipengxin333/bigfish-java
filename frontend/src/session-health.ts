@@ -93,7 +93,7 @@ export function sessionHealth(runtime: RuntimeView | null, trace: RuntimeDiagnos
       active ? '采集已失败；后端仍报告会话运行中，不能据此认为互动正常，也不能确认已经停止。' : detail, next, true, 'config')
   } else if (r.state === 'FAILED') {
     summary = result('error', '互动运行失败', '后端已停止本次互动，播放端也随之断开。', '查看详细诊断并检查配置，再由你手动开始。', true, 'config')
-  } else if (op?.action === 'stop') {
+  } else if (op?.action === 'stop' && r.state !== 'STOPPED') {
     summary = result('warning', '停止结果尚未确认', '本页已静音，但停止请求未确认；不能仅凭本页断开认定后端已经停止。', '刷新后端状态核对；不会自动重发停止或启动请求。', true, 'refresh')
   } else if (op?.action === 'start' && idle) {
     const uncertain = ['timeout', 'network', 'invalid'].includes(op.kind)

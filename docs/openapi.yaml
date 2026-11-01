@@ -419,7 +419,7 @@
     },
     "/api/v1/runtime/diagnostics": {
       "get": {
-        "summary": "读取有界运行诊断，不触发模型、语音或采集请求",
+        "summary": "读取有界运行诊断，协调已发生的采集终态，不启动采集或调用供应商",
         "responses": {
           "200": {
             "description": "当前会话摘要及有限阶段记录",
@@ -872,7 +872,7 @@
           },
           "lastError": {
             "type": "string",
-            "description": "最近任务错误的稳定代码，不含供应商响应或凭据；新会话重置。"
+            "description": "本会话最近引擎错误的稳定代码，不含供应商响应或凭据；成功不清除历史。会话终止故障优先，清理异常不得覆盖；新会话重置。非空不等于当前仍未恢复。"
           },
           "lastErrorAt": {
             "type": "string",
@@ -1289,6 +1289,7 @@
           "lastFailure": {
             "type": "object",
             "nullable": true,
+            "description": "同会话最近 FAILED 任务的历史轨迹，最多保留 5 分钟；后续成功不立即清除。不是会话 FAILED 标志，主动取消不更新它。环节定位和恢复需结合同任务阶段及同环节后续成功证据。",
             "allOf": [
               {
                 "$ref": "#/components/schemas/DiagnosticTrace"
