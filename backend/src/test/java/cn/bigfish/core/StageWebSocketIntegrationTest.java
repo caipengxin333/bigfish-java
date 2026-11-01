@@ -78,6 +78,12 @@ class StageWebSocketIntegrationTest {
         long until = System.nanoTime()+TimeUnit.SECONDS.toNanos(3);
         while (engine.status().playback().connected() && System.nanoTime()<until) Thread.sleep(10);
         assertThat(engine.status().playback().connected()).isFalse();
+        var disconnected=mapper.readTree(get("/api/v1/runtime").body());
+        assertThat(disconnected.path("sessionId").asText()).isEqualTo(session);
+        assertThat(disconnected.path("state").asText()).isEqualTo("RUNNING");
+        assertThat(disconnected.path("collector").path("state").asText()).isEqualTo("CONNECTED");
+        assertThat(disconnected.path("player").path("ready").asBoolean()).isFalse();
+        assertThat(disconnected.path("player").path("playing").asBoolean()).isFalse();
         assertThat(get(gift.path("audioUrl").asText()).statusCode()).isEqualTo(404);
         Client second = connect(); second.hello();
         long nextGeneration = second.next("PLAYER_LEASE").path("payload").path("leaseGeneration").asLong();
@@ -86,6 +92,7 @@ class StageWebSocketIntegrationTest {
         assertThat(second.frames.poll(300,TimeUnit.MILLISECONDS)).isNull();
         post("/api/v1/events/simulate",event("fresh",LiveEvent.Type.COMMENT),202);
         assertThat(second.next("PLAY_TASK").path("payload").path("taskId").asText()).isNotEqualTo(gift.path("taskId").asText());
+        assertThat(engine.status().sessionId()).isEqualTo(session);
     }
     @Test void collectorReplayCrossesNormalizationIngressAndAudioWithoutDoubleCountingCombo() throws Exception {
         Client player = connect(); player.hello();

@@ -45,9 +45,9 @@ class SessionApiIntegrationTest {
         mvc.perform(post("/api/v1/sessions/"+first+"/stop")).andExpect(status().isConflict());
         mvc.perform(get("/api/v1/runtime")).andExpect(jsonPath("$.sessionId").value(second)).andExpect(jsonPath("$.state").value("RUNNING"));
     }
-    @Test void rejectsUnsupportedRealModeAndPaidCallsWithoutServerOptIn() throws Exception {
+    @Test void rejectsMissingDouyinRoomAndPaidCallsWithoutServerOptIn() throws Exception {
         mvc.perform(post("/api/v1/sessions").contentType("application/json").content("{\"mode\":\"DOUYIN\",\"conversationMode\":\"MOCK\"}"))
-            .andExpect(status().isUnprocessableEntity()).andExpect(jsonPath("$.code").value("DOUYIN_UNAVAILABLE"));
+            .andExpect(status().isUnprocessableEntity()).andExpect(jsonPath("$.code").value("DOUYIN_ROOM_REQUIRED"));
         mvc.perform(post("/api/v1/sessions").contentType("application/json").content("{\"mode\":\"MOCK\",\"conversationMode\":\"DEEPSEEK\"}"))
             .andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.code").value("PROVIDER_UNAVAILABLE"));
         assertThat(sessions.status().state()).isEqualTo("FAILED");

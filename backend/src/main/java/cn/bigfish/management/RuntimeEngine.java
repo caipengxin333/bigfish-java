@@ -55,7 +55,7 @@ public final class RuntimeEngine implements EventIngress {
     private final ThreadPoolExecutor modelWorker = worker("conversation");
     private final ThreadPoolExecutor speechWorker = worker("speech");
     private State state = State.STOPPED;
-    private String sessionId = "", roomId = "", conversationMode = "MOCK";
+    private String sessionId = "", roomId = "", mode = "MOCK", conversationMode = "MOCK";
     private ConversationPort conversation;
     private Job modelJob, speechJob;
     private Future<?> modelCall, speechCall;
@@ -75,17 +75,40 @@ public final class RuntimeEngine implements EventIngress {
     /** Real calls require both this explicit choice and the server-side credential/paid-call gate. */
     public synchronized String startMock(boolean useDeepSeek) { return startMock(useDeepSeek,testSpeech,"LOCAL_TEST_TONE"); }
     public synchronized String startMock(boolean useDeepSeek, SpeechPort selectedSpeech, String selectedSpeechMode) {
+        return start(StartSessionRequest.Mode.MOCK,useDeepSeek,selectedSpeech,selectedSpeechMode);
+    }
+    public synchronized String start(StartSessionRequest.Mode selectedMode, boolean useDeepSeek,
+                                     SpeechPort selectedSpeech, String selectedSpeechMode) {
         if (closed || (state != State.STOPPED && state != State.FAILED)) throw new IllegalStateException("SESSION_ACTIVE");
         state = State.STARTING;
+        conversation = null;
         try {
             conversation = useDeepSeek ? realFactory.get() : mock;
             speech=Objects.requireNonNull(selectedSpeech); speechMode=selectedSpeechMode; lastError=""; lastErrorAt="";
             conversationMode = useDeepSeek ? "DEEPSEEK" : "MOCK";
-            sessionId = UUID.randomUUID().toString(); roomId = "mock-room";
+            sessionId = UUID.randomUUID().toString(); mode = selectedMode.name();
+            roomId = selectedMode == StartSessionRequest.Mode.MOCK ? "mock-room" : "";
             appliedVersion = configs.snapshot().version(); lastWelcome = Instant.MIN;
             recent.clear(); playback.begin(sessionId); state = State.RUNNING;
             return sessionId;
-        } catch (RuntimeException error) { state = State.FAILED; throw new IllegalStateException("PROVIDER_UNAVAILABLE"); }
+        } catch (RuntimeException error) {
+            stop(sessionId); // Also close a model allocated before a later startup step failed.
+            state = State.FAILED; throw new IllegalStateException("PROVIDER_UNAVAILABLE");
+        }
+    }
+    /** Bind once from the resolver, before WSS dispatch. Reconnects must retain this broadcast ID. */
+    public synchronized boolean bindDouyinRoom(String id, String internalRoomId) {
+        if (state != State.RUNNING || !sessionId.equals(id) || !mode.equals("DOUYIN")
+            || internalRoomId == null || !internalRoomId.matches("[0-9]{1,30}")) return false;
+        if (!roomId.isEmpty()) return roomId.equals(internalRoomId);
+        roomId = internalRoomId;
+        return true;
+    }
+    public synchronized void collectorFailed(String id) {
+        if (!sessionId.equals(id) || state != State.RUNNING) return;
+        stop(id);
+        state = State.FAILED; lastError = "COLLECTOR_FAILED"; lastErrorAt = clock.instant().toString();
+        failures++;
     }
     public synchronized void stop(String id) {
         if (!sessionId.equals(id) || state == State.STOPPED) return;
@@ -93,7 +116,8 @@ public final class RuntimeEngine implements EventIngress {
         cancelModel(Reason.SESSION_STOPPED); cancelSpeech(Reason.SESSION_STOPPED);
         comments.clear(); templates.clear(); synthesis.clear(); recent.clear();
         playback.stop("SESSION_STOPPED");
-        if (conversation instanceof AutoCloseable closeable) {
+        ConversationPort retiringConversation=conversation; conversation=null;
+        if (retiringConversation instanceof AutoCloseable closeable) {
             try { closeable.close(); } catch (Exception ignored) { lastError="MODEL_CLOSE_FAILED"; lastErrorAt=clock.instant().toString(); }
         }
         state = State.STOPPED;
@@ -221,7 +245,7 @@ public final class RuntimeEngine implements EventIngress {
                                 trace(job,Stage.SPEECH_WAIT,Reason.NONE);
                         } else trace(job,Stage.CANCELLED,invalidReason(job));
                     }
-                } catch (Exception error) { port.cancel(job.id()); failed("MODEL",job,error); }
+                } catch (Exception error) { failed("MODEL",job,error); cancelPort("MODEL",job,() -> port.cancel(job.id())); }
                 finally { synchronized (this) { if (modelJob == job) { modelJob = null; modelCall = null; } } }
             });
         } catch (RejectedExecutionException error) {
@@ -254,7 +278,7 @@ public final class RuntimeEngine implements EventIngress {
                             if (!playback.enqueue(task,content,configs.snapshot().settings().playbackQueueCapacity(),job.epoch(),asset.duration())) dropped++;
                         } else trace(job,Stage.CANCELLED,invalidReason(job));
                     }
-                } catch (Exception error) { port.cancel(job.id()); failed("SPEECH",job,error); }
+                } catch (Exception error) { failed("SPEECH",job,error); cancelPort("SPEECH",job,() -> port.cancel(job.id())); }
                 finally {
                     try { if(asset!=null && !releaseAttempted) port.release(asset); }
                     catch(RuntimeException error) { failed("SPEECH",job,error); }
@@ -314,15 +338,25 @@ public final class RuntimeEngine implements EventIngress {
         return modelJob != null || speechJob != null || comments.size() + templates.size() + synthesis.size() + p.queued() > 0 || p.playing();
     }
     private void cancelModel(Reason reason) {
-        if (modelJob != null) { Job job = modelJob; modelJob = null; trace(job,Stage.CANCELLED,reason); conversation.cancel(job.id()); }
+        if (modelJob != null) { Job job = modelJob; modelJob = null; trace(job,Stage.CANCELLED,reason); cancelPort("MODEL",job,() -> conversation.cancel(job.id())); }
         if (modelCall != null) { modelCall.cancel(true); modelCall = null; }
     }
     private void cancelSpeech(Reason reason) {
-        if (speechJob != null) { Job job = speechJob; speechJob = null; trace(job,Stage.CANCELLED,reason); speech.cancel(job.id()); }
+        if (speechJob != null) { Job job = speechJob; speechJob = null; trace(job,Stage.CANCELLED,reason); cancelPort("SPEECH",job,() -> speech.cancel(job.id())); }
         if (speechCall != null) { speechCall.cancel(true); speechCall = null; }
     }
+    private void cancelPort(String type, Job job, Runnable cancel) {
+        try { cancel.run(); }
+        catch (RuntimeException ignored) {
+            synchronized (this) {
+                // Cleanup failures must not abort the rest of stop or overwrite a newer session.
+                if (!sessionId.equals(job.event().sessionId()) || !job.failed().compareAndSet(false,true)) return;
+                failures++; lastError=type+"_CANCEL_FAILED"; lastErrorAt=clock.instant().toString();
+            }
+        }
+    }
     public synchronized Status status() {
-        return new Status(sessionId,state,"MOCK",conversationMode,speechMode,configs.snapshot().version(),appliedVersion,
+        return new Status(sessionId,state,mode,conversationMode,speechMode,configs.snapshot().version(),appliedVersion,
             roomId,comments.size(),templates.size(),synthesis.size(),modelJob != null,speechJob != null,dropped,failures,playback.status(),lastError,lastErrorAt);
     }
     public synchronized DiagnosticsView diagnostics() {

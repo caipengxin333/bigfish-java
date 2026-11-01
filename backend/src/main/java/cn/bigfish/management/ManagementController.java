@@ -23,12 +23,12 @@ public class ManagementController {
     public Map<String,Object> bootstrap() {
         return Map.of("application", "BigFish Java", "version", "0.1.0-SNAPSHOT", "mode", "READY",
             "sessionState", runtime.status().state().name(), "capabilities", Map.of("configPersistence", true,
-            "douyinCollector", false, "conversation", true, "speech", providers.status().aliyun().enabled(), "playback", true,
+            "douyinCollector", true, "conversation", true, "speech", providers.status().aliyun().enabled(), "playback", true,
             "mockMode", true, "localTestSpeech", true));
     }
     @GetMapping("/config") public ConfigSnapshot config() { return configs.current(); }
     @PutMapping("/config") public ConfigSnapshot update(@Valid @RequestBody UpdateConfigRequest request) { return configs.update(request); }
-    @GetMapping("/providers") public ProvidersView providers() { return providers.status(); }
+    @GetMapping("/providers") public ProvidersView providers() { return providers.status(sessions.douyinStatus()); }
     @PostMapping("/providers/deepseek/check") public ProvidersView.ModelCheck checkModel() {
         return providers.checkModel(configs.snapshot().settings().model());
     }

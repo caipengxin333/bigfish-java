@@ -46,7 +46,7 @@ class ManagementIntegrationTest {
     @Test void bootstrapDoesNotAdvertiseUnimplementedFeatures() throws Exception {
         mvc.perform(get("/api/v1/bootstrap")).andExpect(status().isOk())
             .andExpect(jsonPath("$.mode").value("READY"))
-            .andExpect(jsonPath("$.capabilities.douyinCollector").value(false));
+            .andExpect(jsonPath("$.capabilities.douyinCollector").value(true));
     }
     @Test void ignoresNoSecretFields() throws Exception {
         mvc.perform(put("/api/v1/config").contentType("application/json")

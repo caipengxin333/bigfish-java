@@ -61,6 +61,9 @@ public final class ProviderServices {
         } catch (SpeechFailure failure) { throw new SessionException("NLS_"+failure.code().name(),503); }
     }
     public synchronized ProvidersView status() {
+        return status(new ProvidersView.Provider(true,true,"UNVERIFIED","LIVE_RECEIVE_NOT_VERIFIED"));
+    }
+    public synchronized ProvidersView status(ProvidersView.Provider douyin) {
         var configuration=nlsConfiguration();
         boolean key=has("BIGFISH_DEEPSEEK_API_KEY"), nlsKey=configuration.configured();
         String modelState=lastCheck==null ? "UNVERIFIED" : lastCheck.authentication().equals("PASSED") ? "CATALOG_CHECKED" : "CHECK_FAILED";
@@ -74,7 +77,7 @@ public final class ProviderServices {
         return new ProvidersView(
             new ProvidersView.Provider(key,key&&paid(),key ? modelState : "MISSING",!key ? "MISSING_CREDENTIALS" : !paid() ? "PAID_CALLS_DISABLED" : lastCheck==null ? "NOT_CHECKED" : lastCheck.code()),
             new ProvidersView.Provider(nlsKey,nlsKey&&paid(),nlsState,nlsReason),
-            new ProvidersView.Provider(false,false,"UNVERIFIED","LIVE_RECEIVE_NOT_VERIFIED"),
+            douyin,
             AlibabaNlsSpeech.VOICES.stream().sorted().toList(),300,25,token);
     }
     private ProvidersView.TokenState tokenStatus(NlsConfiguration configuration) {
