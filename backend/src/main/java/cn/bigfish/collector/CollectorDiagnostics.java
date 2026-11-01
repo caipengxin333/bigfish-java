@@ -11,6 +11,8 @@ public final class CollectorDiagnostics {
         HANDSHAKE_ATTEMPT, ROOM_CHANGED }
 
     private final Map<Counter, LongAdder> counters = new ConcurrentHashMap<>();
+    private final InboundDiagnostics inbound = new InboundDiagnostics();
+    InboundDiagnostics inbound() { return inbound; }
     private volatile String lastError = "";
     private volatile long lastErrorElapsedMillis;
 

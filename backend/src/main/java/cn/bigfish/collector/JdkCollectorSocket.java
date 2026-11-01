@@ -29,6 +29,7 @@ final class JdkCollectorSocket implements CollectorSocket, WebSocket.Listener {
     private volatile CompletableFuture<WebSocket> opening;
     private volatile long lastActivity = System.nanoTime();
     private long fragmentStarted;
+    private int fragmentCount;
     private boolean dropping;
 
     JdkCollectorSocket(CollectorOptions options, CollectorDiagnostics diagnostics, Clock clock) {
@@ -67,15 +68,28 @@ final class JdkCollectorSocket implements CollectorSocket, WebSocket.Listener {
     @Override public CompletionStage<?> onBinary(WebSocket webSocket, ByteBuffer data, boolean last) {
         if (closed.get()) return CompletableFuture.completedFuture(null);
         lastActivity = System.nanoTime();
+        fragmentCount = Math.min(Integer.MAX_VALUE - 1, fragmentCount) + 1;
         if (fragmentStarted == 0) fragmentStarted = lastActivity;
-        if (!dropping && (data.remaining() > options.maxFrameBytes() - fragments.size()
-                || lastActivity - fragmentStarted >= options.queueTtl().toNanos())) {
+        boolean oversized = data.remaining() > options.maxFrameBytes() - fragments.size();
+        if (!dropping && (oversized || lastActivity - fragmentStarted >= options.queueTtl().toNanos())) {
+            diagnostics.inbound().record(InboundDiagnostics.Stage.ASSEMBLY,
+                    oversized ? InboundDiagnostics.Reason.SIZE_LIMIT : InboundDiagnostics.Reason.TTL,
+                    new InboundDiagnostics.Shape(fragments.size(), data.remaining(), fragmentCount, 0,
+                            InboundDiagnostics.Encoding.NONE, false, java.util.List.of()));
             dropping = true; fragments.reset(); diagnostics.error(MALFORMED, 0);
         }
         if (!dropping) { byte[] bytes = new byte[data.remaining()]; data.get(bytes); fragments.writeBytes(bytes); }
         if (last) {
-            if (!closed.get() && !dropping && !inbound.offer(new Frame(fragments.toByteArray(), clock.instant()))) diagnostics.increment(QUEUE_FULL);
-            fragments.reset(); dropping = false; fragmentStarted = 0;
+            if (!closed.get() && !dropping) {
+                diagnostics.inbound().record(InboundDiagnostics.Stage.ASSEMBLY, InboundDiagnostics.Reason.OK,
+                        new InboundDiagnostics.Shape(fragments.size(), 0, fragmentCount, 0,
+                                InboundDiagnostics.Encoding.NONE, false, java.util.List.of()));
+                if (!inbound.offer(new Frame(fragments.toByteArray(), clock.instant()))) {
+                    diagnostics.increment(QUEUE_FULL);
+                    diagnostics.inbound().record(InboundDiagnostics.Stage.QUEUE, InboundDiagnostics.Reason.QUEUE_FULL, null);
+                }
+            }
+            fragments.reset(); dropping = false; fragmentStarted = 0; fragmentCount = 0;
         }
         webSocket.request(1);
         return CompletableFuture.completedFuture(null);

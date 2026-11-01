@@ -110,11 +110,14 @@ abstract class AbstractCollector implements CollectorPort {
             long started = System.nanoTime();
             try {
                 normalizer.normalize(input, receivedAt).ifPresent(event -> {
+                    diagnostics.inbound().record(InboundDiagnostics.Stage.NORMALIZE, InboundDiagnostics.Reason.OK,
+                            InboundDiagnostics.Kind.valueOf(event.type().name()), null);
                     synchronized (AbstractCollector.this) {
                         if (active.get() && !events.offer(event)) diagnostics.increment(QUEUE_FULL);
                     }
                 });
             } catch (RuntimeException exception) {
+                diagnostics.inbound().record(InboundDiagnostics.Stage.NORMALIZE, InboundDiagnostics.Reason.INVALID_EVENT, null);
                 diagnostics.error(MALFORMED, (System.nanoTime() - started) / 1_000_000);
             }
         }

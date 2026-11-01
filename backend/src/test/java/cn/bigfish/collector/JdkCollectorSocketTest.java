@@ -46,6 +46,10 @@ class JdkCollectorSocketTest {
             peer.send(0, true, Arrays.copyOfRange(packet, 7, packet.length));
             var received = socket.poll(Duration.ofSeconds(2));
             assertNotNull(received); assertArrayEquals(packet, received.bytes());
+            var assembly = diagnostics.inbound().snapshot().samples().stream()
+                    .filter(sample -> sample.key().stage() == InboundDiagnostics.Stage.ASSEMBLY).findFirst().orElseThrow();
+            assertEquals(InboundDiagnostics.Reason.OK, assembly.key().reason());
+            assertTrue(assembly.shape().fragments() >= 2); assertEquals(packet.length, assembly.shape().inputBytes());
             var pong = peer.received.poll(2, TimeUnit.SECONDS);
             assertNotNull(pong); assertEquals(10, pong.opcode()); assertArrayEquals(new byte[]{42}, pong.bytes());
             byte[] heartbeat = HexFormat.of().parseHex("3a026862");
@@ -75,6 +79,8 @@ class JdkCollectorSocketTest {
             peer.send(2, true, new byte[]{1}); peer.send(2, true, new byte[]{2});
             await(() -> diagnostics.count(QUEUE_FULL) == 1);
             assertEquals(1, diagnostics.count(MALFORMED));
+            assertEquals(1L, diagnostics.inbound().snapshot().counts().get(new InboundDiagnostics.Key(
+                    InboundDiagnostics.Stage.ASSEMBLY, InboundDiagnostics.Reason.SIZE_LIMIT, InboundDiagnostics.Kind.NONE)));
             assertArrayEquals(new byte[]{1}, socket.poll(Duration.ofSeconds(1)).bytes());
             peer.send(2, true, new byte[]{3});
             assertArrayEquals(new byte[]{3}, socket.poll(Duration.ofSeconds(1)).bytes());
@@ -94,7 +100,10 @@ class JdkCollectorSocketTest {
             peer.send(9, true, new byte[]{1}); assertNotNull(peer.received.poll(2, TimeUnit.SECONDS));
             Thread.sleep(60); peer.send(0, true, new byte[]{2}); peer.send(2, true, new byte[]{3});
             assertArrayEquals(new byte[]{3}, socket.poll(Duration.ofSeconds(2)).bytes());
-            assertEquals(1, diagnostics.count(MALFORMED)); peer.assertHealthy();
+            assertEquals(1, diagnostics.count(MALFORMED));
+            assertEquals(1L, diagnostics.inbound().snapshot().counts().get(new InboundDiagnostics.Key(
+                    InboundDiagnostics.Stage.ASSEMBLY, InboundDiagnostics.Reason.TTL, InboundDiagnostics.Kind.NONE)));
+            peer.assertHealthy();
         }
     }
 

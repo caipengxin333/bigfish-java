@@ -15,6 +15,14 @@ class DouyinCollectorProbeTest {
         var valid = Map.of("BIGFISH_DOUYIN_LIVE_PROBE", "true", "BIGFISH_DOUYIN_ROOM", "123456",
                 "BIGFISH_DOUYIN_PROBE_ACTION", "receive");
         assertEquals(60, DouyinCollectorProbe.configuration(valid::get).seconds());
+        assertEquals(3, DouyinCollectorProbe.configuration(valid::get).maxAttempts());
+        var single = new java.util.HashMap<>(valid); single.put("BIGFISH_DOUYIN_PROBE_MAX_ATTEMPTS", "1");
+        assertEquals(1, DouyinCollectorProbe.configuration(single::get).maxAttempts());
+        for (String invalid : new String[]{"0", "4", "not-a-number"}) {
+            single.put("BIGFISH_DOUYIN_PROBE_MAX_ATTEMPTS", invalid);
+            assertEquals(PROBE_CONFIGURATION_INVALID, assertThrows(DouyinFailure.class,
+                    () -> DouyinCollectorProbe.configuration(single::get)).code());
+        }
         assertEquals("guest", DouyinCollectorProbe.configuration(valid::get).credentialMode());
         assertEquals(SIGNER_UNAVAILABLE, assertThrows(DouyinFailure.class, () -> DouyinCollectorProbe.run(valid::get)).code());
         var tooLong = new java.util.HashMap<>(valid); tooLong.put("BIGFISH_DOUYIN_PROBE_SECONDS", "121");
