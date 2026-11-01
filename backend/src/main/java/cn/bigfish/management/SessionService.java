@@ -116,8 +116,8 @@ public final class SessionService {
         } catch (RuntimeException failure) {
             open.set(false);
             context.startupError="COLLECTOR_START_FAILED";
-            retire(CollectorPort.State.FAILED);
             engine.collectorFailed(id);
+            retire(CollectorPort.State.FAILED);
             throw new SessionException("COLLECTOR_START_FAILED",503);
         }
     }
