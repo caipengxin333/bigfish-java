@@ -34,6 +34,11 @@ class WebDouyinConnectionProviderTest {
         String html = fixture("live");
         var credentialCalls = new AtomicInteger(); var pages = new AtomicInteger();
         var signatures = new CopyOnWriteArrayList<DouyinSigner.Request>();
+        var nativeSigner = new NativeDouyinSigner();
+        var recordingSigner = new DouyinSigner() {
+            public Provenance provenance() { return nativeSigner.provenance(); }
+            public SignedTarget sign(Request request) throws Exception { signatures.add(request); return nativeSigner.sign(request); }
+        };
         var sockets = new CopyOnWriteArrayList<DouyinCollectorTest.FakeSocket>();
         var opened = new CopyOnWriteArrayList<DouyinConnection>();
         var resolver = new DouyinRoomResolver(Clock.systemUTC(), (uri, headers) -> {
@@ -41,7 +46,7 @@ class WebDouyinConnectionProviderTest {
             return new DouyinRoomResolver.Page(200, "text/html", html);
         });
         var provider = new WebDouyinConnectionProvider(() -> new DouyinCredentials("synthetic=" + credentialCalls.incrementAndGet(),
-                "SyntheticTestAgent/1", "987654", Instant.now().plusSeconds(60)), signer(request -> { signatures.add(request); return signed(request); }),
+                "SyntheticTestAgent/1", "987654", Instant.now().plusSeconds(60)), recordingSigner,
                 resolver, Clock.systemUTC());
         try (var collector = new DouyinCollector(provider, DouyinCollectorTest.quick(), Clock.systemUTC(), () -> {
             var socket = new DouyinCollectorTest.FakeSocket() {
@@ -56,12 +61,16 @@ class WebDouyinConnectionProviderTest {
             assertNotEquals(signatures.get(0).nonce(), signatures.get(1).nonce());
             assertNotEquals(opened.get(0).endpoint, opened.get(1).endpoint);
             assertEquals("synthetic=2", opened.get(1).headers.get("Cookie")); assertEquals(0, provider.inFlightRequests());
+            assertEquals(2, provider.signingAttempts()); assertEquals(0, provider.signingWorkers());
         }
     }
 
     @Test void endedRoomAndInternalRoomChangeEndWithoutOpeningAnotherSocket() throws Exception {
         var signs = new AtomicInteger();
-        var signer = signer(request -> { signs.incrementAndGet(); return signed(request); });
+        var signer = signer(request -> {
+            if (signs.incrementAndGet() > 1) throw new IllegalStateException("Must end before another signing attempt");
+            return signed(request);
+        });
         var ended = new WebDouyinConnectionProvider(DouyinRoomResolverTest::credentials, signer, resolver(fixture("ended")), Clock.systemUTC());
         assertTrue(ended.resolve("123456").ended); assertEquals(0, signs.get());
         String live = fixture("live"); var pages = new AtomicInteger(); var socket = new DouyinCollectorTest.FakeSocket();
@@ -73,6 +82,7 @@ class WebDouyinConnectionProviderTest {
             collector.start("123456", "s", event -> fail()); await(() -> socket.open); socket.open = false;
             await(() -> collector.state() == CollectorPort.State.ENDED); await(() -> collector.resources().released());
             assertEquals(1, opens.get()); assertEquals(2, pages.get());
+            assertEquals(1, signs.get()); assertEquals(1, collector.diagnostics().count(CollectorDiagnostics.Counter.ROOM_CHANGED));
         }
     }
 

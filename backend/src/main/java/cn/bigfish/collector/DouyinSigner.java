@@ -4,7 +4,7 @@ import java.net.URI;
 import java.time.Instant;
 
 /**
- * Extension point for separately reviewed signing code. No implementation is bundled.
+ * Signing boundary. The bundled native implementation is MIT-derived and needs separate online verification.
  * Implementations must honor interruption, bound execution to ten seconds, and never log inputs/results.
  * Cookie is intentionally absent: signing code must not forward the user's login to a third party.
  */

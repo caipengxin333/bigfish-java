@@ -99,6 +99,14 @@ class DouyinRoomResolverTest {
         var injection = new DouyinCredentials("synthetic=1\r\nInvalid: header", "test", "123", Instant.now().plusSeconds(60));
         assertEquals(CREDENTIALS_INVALID, assertThrows(DouyinFailure.class, () -> resolver.resolve("123", injection)).code());
         assertEquals(0, calls.get()); assertEquals(0, resolver.inFlightRequests());
+        assertEquals(0, resolver.requestsStarted());
+    }
+
+    @Test void explicitChallengeOn403IsNotMisdiagnosedAsCookieFailure() {
+        var resolver = new DouyinRoomResolver(Clock.systemUTC(), (uri, headers) ->
+                new DouyinRoomResolver.Page(403, "text/html", "<TITLE>安全验证 - 抖音</TITLE>"));
+        assertEquals(CHALLENGE_REQUIRED, assertThrows(DouyinFailure.class, () -> resolver.resolve("123456", credentials())).code());
+        assertEquals(1, resolver.requestsStarted()); assertEquals(0, resolver.inFlightRequests());
     }
 
     @Test void canonicalFetchReceivesOnlyCurrentCredentialsAndCannotFollowRedirect() throws Exception {

@@ -117,7 +117,7 @@ class JdkCollectorSocketTest {
     }
 
     /** Tiny RFC6455 loopback peer. No external network, cookies or platform services. */
-    private static final class LoopbackPeer implements AutoCloseable {
+    static final class LoopbackPeer implements AutoCloseable {
         record ClientFrame(int opcode, byte[] bytes) { }
         final ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
         final ArrayBlockingQueue<ClientFrame> received = new ArrayBlockingQueue<>(16);

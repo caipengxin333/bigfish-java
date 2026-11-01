@@ -26,6 +26,7 @@ public final class DouyinRoomResolver {
     private final Clock clock;
     private final PageFetcher fetcher;
     private final AtomicInteger inFlight = new AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicLong requests = new java.util.concurrent.atomic.AtomicLong();
 
     public DouyinRoomResolver() { this(Clock.systemUTC(), new JdkPageFetcher(Duration.ofSeconds(10), 2 * 1024 * 1024)); }
     DouyinRoomResolver(Clock clock, PageFetcher fetcher) { this.clock = clock; this.fetcher = fetcher; }
@@ -34,12 +35,23 @@ public final class DouyinRoomResolver {
         DouyinRoomInput room = DouyinRoomInput.parse(input);
         if (credentials == null) throw new DouyinFailure(CREDENTIALS_MISSING);
         credentials.validate(clock.instant());
+        Page page = fetch(room.pageUri(), credentials.headers(room));
+        credentials.validate(clock.instant());
+        return DouyinRoomPage.parse(page.body, room);
+    }
+
+    /** Only the homepage and canonical room pages; guest bootstrap cannot fetch arbitrary URLs. */
+    Page fetch(URI uri, Map<String, String> headers) throws DouyinFailure, InterruptedException {
+        if (!URI.create("https://live.douyin.com/").equals(uri)) DouyinRoomInput.parse(uri.toString());
         if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
         inFlight.incrementAndGet();
         try {
-            Page page = fetcher.get(room.pageUri(), credentials.headers(room));
+            requests.incrementAndGet();
+            Page page = fetcher.get(uri, headers);
             if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
-            credentials.validate(clock.instant());
+            if (page == null || page.contentType == null) throw new DouyinFailure(PAGE_STRUCTURE_CHANGED);
+            if ((page.status == 200 || page.status == 401 || page.status == 403)
+                    && page.contentType.toLowerCase(Locale.ROOT).startsWith("text/html")) DouyinRoomPage.checkGate(page.body);
             if (page.status == 401 || page.status == 403) throw new DouyinFailure(AUTH_REQUIRED);
             if (page.status == 451) throw new DouyinFailure(REGION_RESTRICTED);
             if (page.status == 429) throw new DouyinFailure(RATE_LIMITED);
@@ -48,15 +60,19 @@ public final class DouyinRoomResolver {
             if (page.status != 200 || !page.contentType.toLowerCase(Locale.ROOT).startsWith("text/html")) {
                 throw new DouyinFailure(PAGE_STRUCTURE_CHANGED);
             }
-            return DouyinRoomPage.parse(page.body, room);
+            if (page.body == null || page.body.length() > 2 * 1024 * 1024) throw new DouyinFailure(RESPONSE_TOO_LARGE);
+            return page;
         } finally { inFlight.decrementAndGet(); }
     }
     public int inFlightRequests() { return inFlight.get(); }
+    public long requestsStarted() { return requests.get(); }
 
     @FunctionalInterface interface PageFetcher {
         Page get(URI uri, Map<String, String> headers) throws DouyinFailure, InterruptedException;
     }
-    record Page(int status, String contentType, String body) {
+    record Page(int status, String contentType, String body, List<String> setCookies) {
+        Page(int status, String contentType, String body) { this(status, contentType, body, List.of()); }
+        Page { setCookies = List.copyOf(setCookies); }
         @Override public String toString() { return "Page[redacted]"; }
     }
 
@@ -75,8 +91,12 @@ public final class DouyinRoomResolver {
                 pending = client.sendAsync(builder.build(), ignored -> new LimitedBody(maximum));
                 // Unlike ofInputStream, this deadline includes the entire response body.
                 var response = pending.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+                var cookies = response.headers().allValues("Set-Cookie");
+                if (cookies.size() > 32 || cookies.stream().mapToLong(String::length).sum() > 16384) {
+                    throw new DouyinFailure(RESPONSE_TOO_LARGE);
+                }
                 return new Page(response.statusCode(), response.headers().firstValue("Content-Type").orElse(""),
-                        new String(response.body(), StandardCharsets.UTF_8));
+                        new String(response.body(), StandardCharsets.UTF_8), cookies);
             } catch (TimeoutException exception) { throw new DouyinFailure(HTTP_TIMEOUT); }
             catch (ExecutionException exception) {
                 Throwable cause = exception.getCause();

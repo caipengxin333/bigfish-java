@@ -28,8 +28,12 @@ final class WireFixtures {
         return new WireFixtures().text(1, method).bytes(2, payload).build();
     }
     static byte[] gift(long id, long user, long group, long quantity, boolean textCounts) {
+        return gift(id, user, group, quantity, textCounts, false);
+    }
+    static byte[] gift(long id, long user, long group, long quantity, boolean textCounts, boolean repeatEnd) {
         var body = new WireFixtures().bytes(1, common(id, 123)).number(2, 8).bytes(7, user(user))
                 .bytes(15, new WireFixtures().number(5, 8).number(12, 1).text(16, "测试礼物").build());
+        body.number(9, repeatEnd ? 1 : 0);
         if (textCounts) body.text(4, "1").text(5, Long.toString(quantity)).text(6, "0").text(11, Long.toString(group));
         else body.number(4, 1).number(5, quantity).number(6, 0).number(11, group);
         return envelope("WebcastGiftMessage", body.build());
