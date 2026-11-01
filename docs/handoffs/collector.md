@@ -1,4 +1,112 @@
-# 入站 MALFORMED 解码修复与首次有效接收（2026-11-02）
+# 小心心未进入感谢流程：礼物阶段诊断交接（2026-11-02）
+
+本节为最新交接。**已修复诊断缺口；尚未确认用户此前送“小心心”没有感谢的根因，也未验收真实礼物。** 下方入站解码和页面初始化记录是历史轮次，不能当成本轮送礼证据。
+
+## 提交与边界
+
+- 工作树 / 分支：bigfish-worktrees/collector / feature/douyin-collector；开工检查正确且干净，从 77857f6 快进合入 main **803532fa1f6a64bad038f5cd18c8ab322c53b03e**。
+- 实现与测试提交：**e26dfa2511c3a20daab3ae52e6fdaef2fe9fac03**，feat(collector): trace gift methods through bounded session diagnostics。
+- 提交后工作区干净，交付前祖先检查通过，git merge --no-edit main 返回 Already up to date。本文另作文档提交，SHA 见最终回复。
+- 仅修改 collector 包、对应 collector 测试和本交接；没有改会话业务、前端、公共 DTO / POM、依赖、签名/初始化参数或旧项目。未停止或操作主窗口的直播；没有推送、PR、批量删除或联系其他窗口。
+
+## 已确认与未确认
+
+1. 已确认旧诊断的局限：未知 method 只聚合 UNKNOWN，InboundDiagnostics 结构摘要仅 probe 输出；主会话看不到原始 method 的出现次数，也没有逐阶段的礼物归因。现在主会话用现有 DouyinCollector 工厂即可自动产生日志，不需要公共接口或配置接线变更。
+2. WebcastGiftMessage 已在当前 Java method 分派中支持，所用字段与固定 revision 的公开协议定义一致；人工礼物可通过解析、数量增量、去重、队列及 sink。本轮未发现足以修改礼物字段号、ACK、签名或连接参数的真实证据。
+3. 本轮在用户新指定的在播房间进行一次 60 秒游客接收：12 条 envelope 全部可解析，2 条有效评论到本地 sink，10 条为具名的未支持/统计类型，**WebcastGiftMessage=0**，无解析、归一化或队列错误。此窗口没有看到礼物 method；不能据此推断此前礼物不存在、游客接口一律不推礼物、Cookie 失效或登录必然能解决。
+4. 没有对本轮窗口中的自然送礼事实做外部确认，也没有收到礼物可核验“小心心”的具体 ID / 字段形状。**真实礼物、真实连击数量、感谢播出均未验证。** 用户此前送礼发生在旧代码/另一观察窗口，缺少当时的 method 与阶段证据，不能追溯其确切丢失点。
+
+## 接口能力与来源核对
+
+仅只读核对来源，解析及诊断仍为独立 Java 实现；没有复制或执行旧 AI-Vtuber AGPL sign.js、上游 Go 代码或 generated/proto 文件，没有新增依赖。
+
+| 来源 | 固定版本 / 许可 | 本轮核对结果与界限 |
+| --- | --- | --- |
+| [抖音官方直播互动工具说明](https://partner.open-douyin.com/docs/resource/zh-CN/live-interactive-tools/introduction/interactive-tools-guide) | 2026-11-02 只读查看的在线说明；不纳入仓库 | 说明互动工具可获取评论和礼物信息，适用于对应工具接入场景；它不是任意网页房间游客 Webcast 的稳定/完整消息开放承诺。本轮没有申请或调用此官方能力 |
+| [douyinlive-proto new_douyin.proto](https://github.com/jwwsjlm/douyinlive-proto/blob/0d661be57c8f80947054b2ef0cd1ac2fdce3cc4b/protobuf/new_douyin.proto) | v0.1.3，0d661be57c8f80947054b2ef0cd1ac2fdce3cc4b；[MIT](https://github.com/jwwsjlm/douyinlive-proto/blob/0d661be57c8f80947054b2ef0cd1ac2fdce3cc4b/LICENSE) | GiftMessage common=1、gift_id=2、group/repeat/combo_count=4/5/6、user=7、repeat_end=9、group_id=11、gift=15；GiftStruct id=5、diamond_count=12、name=16，与当前映射一致。新定义还有 total_count=29、use_room_message=43、count=44；缺少实际礼物形状和语义证据，本轮不猜测其计数或路由用途 |
+| [douyinLive 参数](https://github.com/jwwsjlm/douyinLive/blob/af34f7c2ea2c4df90c6f4659e967fb31815d9255/websocket_params.go)、[初始化](https://github.com/jwwsjlm/douyinLive/blob/af34f7c2ea2c4df90c6f4659e967fb31815d9255/http_context.go)、[连接](https://github.com/jwwsjlm/douyinLive/blob/af34f7c2ea2c4df90c6f4659e967fb31815d9255/websocket_connection.go)、[解码/ACK](https://github.com/jwwsjlm/douyinLive/blob/af34f7c2ea2c4df90c6f4659e967fb31815d9255/message_decode.go) | af34f7c2ea2c4df90c6f4659e967fb31815d9255；[MIT](https://github.com/jwwsjlm/douyinLive/blob/af34f7c2ea2c4df90c6f4659e967fb31815d9255/LICENSE) | 同类 Web / audience / gzip / support_wrds / push-v2 协议；头部 im-internal_ext ACK 优先，need_ack 时 Response 扩展回退，与已集成修复一致。上游 prepareWebSocketContextLocked 会先刷新页面/room enter，再请求签名 im/fetch，成功时用动态 cursor/internal_ext/push server，失败有兜底。Java 当前从页面初始化，空 cursor、新生成 internal_ext、固定允许的 push host；**这是待验证差异，不是已确认的缺礼物根因** |
+| [douyinLive Cookie 配置](https://github.com/jwwsjlm/douyinLive/blob/af34f7c2ea2c4df90c6f4659e967fb31815d9255/docs/configuration.md)、[README 能力与限制](https://github.com/jwwsjlm/douyinLive/blob/af34f7c2ea2c4df90c6f4659e967fb31815d9255/README.md) | 同上固定 revision / MIT | Cookie 配置可选，可自动取得匿名 ttwid；有 Cookie 不等于登录。README 同时声明不保证业务消息或礼物完整/可靠。本轮没有来源证据证明礼物必须登录，也没有做游客/登录同时间对照 |
+
+GitHub 连接器/网页检索当时不可用，GitHub 最新 commit API 返回 403；改用固定 HTTPS raw 地址只读核对上述文件。因此只声称核对该固定 revision，**不声称它是今天最新 HEAD**。未复制上游历史 cursor、UA/指纹轮换、备用签名服务或登录绕过行为；已通过的 Java 初始化链路保持不变。
+
+## 诊断实现与日志判读
+
+- method 在业务类型过滤之前计数，合法未知类型保留受限名称，未知不等于 MALFORMED。安全名称为最长 80 字符的 Webcast + 英文字母 + Message 形状，并排除 cookie/token/signature/authorization；其余归 INVALID_METHOD。最多 64 个 method 桶（含预留已支持类型及 OTHER_METHOD/INVALID_METHOD），未知超额归 OTHER_METHOD；Gift 的零计数不会被挤掉。
+- 结构层：保留 ASSEMBLY / QUEUE / PUSH / PAYLOAD / DECOMPRESS / RESPONSE / ACK_META / MESSAGE_LIST / ENVELOPE / BODY / COMMON / ROOM / USER / GIFT / EVENT。已知 Gift 的具体解析故障保留 GIFT 类别；不可辨识类型的整帧/列表/envelope 故障计入 unattributedFailures，不能用 giftMethod=0 掩盖它们。
+- 归一化层：NORMALIZE / MISSING_GIFT_ID 或固定故障码。去重层：DEDUP / DUPLICATE_ID、DUPLICATE_COMBO。派发队列：ENQUEUED、QUEUE_FULL、TTL、CANCELLED、ACK_BLOCKED；回调：DISPATCH / SINK_RETURNED、SINK_FAILED。ACK 失败保留所属帧、统计被阻断的已解码事件，沿用原有退避，不把失败 ACK 计成功。
+- 关联使用 sessionId + generation + frame + message 序号，不使用 UID/昵称、业务消息 ID、ACK 扩展或原始载荷。事件排队时携带原始关联上下文，即使重连之后才出队也仍能指向旧代次。帧外/窗口级记录以 frame=0、message=0 表示无具体帧。sessionId 只接受后端 UUID（probe 可有前缀），其他调用方任意文本改用内部脱敏 UUID。
+- 日志统一为 cn.bigfish.collector.InboundDiagnostics 的 `collector_inbound {JSON}`，包含 UTC 时间、sessionId、credentials=GUEST/EXTERNAL/UNSPECIFIED、代次/帧/条目、stage、method、type、固定 code、field/wire/fieldLength/dataLength、total/delta。EXTERNAL 只说明外部凭据注入，**不保证已登录或凭据有效**。未知字段长度无法定位时用 0/-1，不伪造字段内容。
+- 每个 stage/reason/kind/method 首次输出；之后最多每 10 秒合并一次，停止时补齐未打印增量。正常忽略的 RoomStats / RoomRank / RoomUserSeq / RoomDataSync 为 DEBUG，结构/归一化/队列/回调失败为 WARN，其他安全未知类型和处理结果为 INFO。日志桶最多 256，溢出汇入 LOG_CAPACITY；结构摘要仍最多 64、每阶段/原因最多 3、每份最多 12 字段。原 snapshot 的 128-key 兼容视图保留，同时新增固定枚举键空间 totals：采样、限频和未知类型容量限制均不丢弃累计次数。
+- 每 30 秒及退出时有 WINDOW / COUNTS 汇总，计数是从本次 start 开始的**会话累计值**，不是最近 30 秒增量。含 methods、giftMethod / giftParsed / giftParseFailed / giftNormalizeFailed / giftDuplicates / giftQueueDropped / giftSinkReturned / giftSinkFailed / unattributedFailures。可辨识 method=0 且无上游故障才支持“本观察窗口未出现该 method”；不是平台礼物能力结论。
+- JDK 回调仅更新有界内存数据，日志 I/O 在已有采集 worker 中、诊断锁之外执行，不新增线程/后台服务。业务 sink 仍在独立有界队列 worker，不阻塞 WebSocket 回调。保留全部大小、队列 TTL、房间隔离、取消和退出保护。
+
+**SINK_RETURNED 只表示 Consumer 回调返回，不等于 EventIngress.ACCEPTED，更不等于感谢语音已播出。** 当前 SessionService 回调可能因关闭直接返回，或 engine.accept 返回拒绝后正常返回；采集接口是 void Consumer，采集模块无法获知具体结果。本轮未修改这一公共语义。
+
+以下是人工单测日志示例（不是线上礼物证据，UUID/字段均为测试数据）：
+
+```json
+{"time":"2026-11-02T00:00:00Z","sessionId":"00000000-0000-4000-8000-000000000001","credentials":"UNSPECIFIED","generation":1,"frame":1,"message":7,"method":"WebcastGiftMessage","sample":"FIRST_OCCURRENCE","stage":"GIFT","type":"GIFT","code":"WIRE_MISMATCH","total":1,"delta":1,"summary":false,"countScope":"SESSION","field":15,"wire":0,"fieldLength":0,"dataLength":38}
+```
+
+解读：同一连接第 1 帧第 7 条礼物已被识别，字段 15 的 wire=0 不符合嵌套消息要求；同批有效礼物和评论仍处理，ACK 仍保留。错误不会打印 exception message/cause、Cookie、签名 URL、正文、昵称、UID、原帧或 hex。重复故障使用 total/delta 汇总；人工回归证明 200 次同类 INVALID_EVENT 不因限频丢计数。
+
+## 测试命令与结果
+
+| 命令 | 最终结果 |
+| --- | --- |
+| ./scripts/maven.sh -B -ntp -pl backend '-Dtest=cn.bigfish.collector.*Test' test | **97/97 通过**，6.645 秒，02:37:25 +08:00 完成 |
+| ./scripts/maven.sh -B -ntp test | **261 项：259 通过、2 项真实 NLS/Token 默认跳过、0 failure/error**，22.829 秒，02:38:02 +08:00 完成 |
+| git diff --check / git diff --cached --check | 通过 |
+
+新增 GiftDiagnosticsTest 7 项覆盖：主 collector 非 probe 日志；有效礼物累计 1→3 转增量 1/2；不同用户独立计 1；同组重复终包两次去重；缺 giftId；gift 字段 15 错误 wire；未知/恶意 method 名称；同批坏礼物/正常评论和礼物共存；ACK 保留与发送失败分层；日志脱敏、首次/限频汇总、计数容量；队列满/过期/回调失败；重连后的旧事件关联；新 session 清空窗口。既有小心心对应的具体真实礼物 ID 未用于夹具，全部数据是人工构造。
+
+中途第一次完整测试暴露旧 MockCollectorTest 的时序竞态：RECEIVED 在 normalize 入口递增，而断言 QUEUE_FULL 需要等到之后的 offer。补充等待 QUEUE_FULL=1，原来的精确数量、队列容量、过期及慢回调保护断言全部保留。之后完整测试两次通过；最终一次结果如上。没有删除/弱化断言。
+
+本地日志：/tmp/bigfish-gift-baseline.log、/tmp/bigfish-gift-full.log（首次竞态失败）、/tmp/bigfish-gift-full-final.log（修正等待后）、/tmp/bigfish-gift-collector-final.log、/tmp/bigfish-gift-full-delivery.log（最终代码）。默认测试不连真实抖音/付费服务；本机回环测试按沙箱权限流程执行。
+
+## 本轮真实只读验证与请求账本
+
+使用本工作树 scripts/dev-backend.sh 加载隔离环境，main class 为 cn.bigfish.collector.DouyinCollectorProbe；没有启动 Spring 业务、调用 DeepSeek/NLS 或连接主窗口会话。环境显式启用 LIVE_PROBE=true、CREDENTIAL_MODE=guest、SIGNER_REVIEWED=true、ALLOW_PAID=false；receive 设 PROBE_SECONDS=60、PROBE_MAX_ATTEMPTS=1。
+
+本次接收命令如下；此前两次房间解析使用同一入口，将 action 改为 resolve，并使用表内对应房间号（resolve 不建立 WSS）：
+
+```sh
+env BIGFISH_DOUYIN_LIVE_PROBE=true BIGFISH_DOUYIN_ROOM=53346665360 \
+  BIGFISH_DOUYIN_PROBE_ACTION=receive BIGFISH_DOUYIN_CREDENTIAL_MODE=guest \
+  BIGFISH_DOUYIN_SIGNER_REVIEWED=true BIGFISH_DOUYIN_PROBE_SECONDS=60 \
+  BIGFISH_DOUYIN_PROBE_MAX_ATTEMPTS=1 BIGFISH_ALLOW_PAID=false \
+  ./scripts/dev-backend.sh -B -ntp \
+  -Dspring-boot.run.main-class=cn.bigfish.collector.DouyinCollectorProbe
+```
+
+| 动作 | 实际结果 |
+| --- | --- |
+| 旧房间 440132407257 resolve | ENDED；HTTP 启动计数 2，2276 ms，inFlight=0；02:31:39 完成；没有 WSS |
+| 用户补充新房间 53346665360，沙箱内首次 resolve | HTTP_UNAVAILABLE，启动计数 1，196 ms；没有握手/业务接收，不作为平台状态证据；按权限流程只重试解析 |
+| 新房间授权网络 resolve | LIVE；HTTP 2，2215 ms，inFlight=0；02:35:09 完成 |
+| 新房间一次 receive | 02:35:29–02:36:29 +08:00；观察预算 60 秒含初始化，停止清理后总计 **60287 ms**；HTTP 2、签名 1、WSS 尝试/成功各 1 |
+| 完整帧与解包 | ASSEMBLY / QUEUE / PUSH / PAYLOAD / DECOMPRESS / RESPONSE / MESSAGE_LIST 各 **3** 次成功；envelope **12**；无解码/归一化/队列失败、无遗漏诊断键 |
+| 本地事件接收器 | **COMMENT 2，GIFT 0，FOLLOW 0，ENTRANCE 0，LIKE 0**；giftUnits 0；重复 0；礼物 method/解析/归一化/去重/队列丢弃/sink 各 0 |
+| ACK / 心跳 | **ACK 3**（ACK_HEADER），heartbeat **6**，MALFORMED **0**，reconnect **0**，lastError 空；未延长等待或另启一轮接收 |
+| 停止 | CONNECTED → STOPPED；sourceThreads / dispatchThreads / queuedEvents / attachedTransports / httpInFlight / signingWorkers **全部 0**，probe 退出码 0、Maven SUCCESS |
+
+12 条 method 明细：WebcastChatMessage=2、WebcastRoomMessage=1、WebcastResidentGuestMessage=2、WebcastLowPcuGuideChatMessage=1、WebcastLowPcuGuideMessage=1、WebcastRoomStatsMessage=2、WebcastRoomRankMessage=2、WebcastRoomUserSeqMessage=1。WebcastGiftMessage=0；OTHER_METHOD/INVALID_METHOD=0。未知类型已具名，不能把 RoomMessage/ResidentGuest 等未支持消息擅自认作礼物。
+
+抖音探测合计：授权网络 HTTP 启动计数 **6**、WSS **1**；另有沙箱内 HTTP_UNAVAILABLE 尝试 **1**。上游 GitHub/官方文档只读下载不计作抖音房间探测。本轮只发送协议 ACK/心跳，未发评论、点赞、关注或购买礼物。没有游客/登录态对照；没有真实礼物、关注、关播或重连证据。资源计数只覆盖采集器持有的资源。
+
+真实脱敏日志位于 /tmp/bigfish-gift-resolve.log、/tmp/bigfish-gift-resolve-new.log、/tmp/bigfish-gift-resolve-new-network.log、/tmp/bigfish-gift-receive.log，不提交原始日志。页面/完整帧仅内存处理。本轮真实日志验证发生于最终 ACK 失败日志帧号补充之前；之后仅补该关联字段及回归，最终完整本地测试通过，没有为重复验证日志而再次联网。历史轮次的 24 评论/46 入场/22 点赞不能混入本轮结果。
+
+## 主窗口处理与剩余证据需求
+
+1. 审核并按流程合并 feature/douyin-collector（实现 e26dfa2 + 本交接提交），重跑回归。主会话现有 SessionCollectors.douyin 使用 WebDouyinConnectionProvider.guest + DouyinCollector，自动带 GUEST 和后端 session UUID；无需改工厂、DTO、POM 或前端。
+2. **不要为此终止正在运行的直播。** 主窗口在用户允许的维护时机重启实际后端进程/重新打包启动，才会加载新日志；刷新网页无效。本窗口没有重启主会话。
+3. 下一次自然出现“小心心”时，以同一 session 的 WINDOW 和各阶段日志定位：method=0 时结合 unattributedFailures 判断是否只能确认“窗口未出现”；method>0 再看 parse/normalize/dedup/queue/sink，不能从感谢未播倒推登录/协议故障。无需打印真实昵称、UID、内容或帧。
+4. 跨模块提案（未实施）：若 giftSinkReturned>0 但业务未感谢，请后端窗口补同 session 的 GIFT ingress ACCEPTED/拒绝原因计数，并关联后续礼物模板/任务结果。当前 void Consumer 不能给采集器传回这些结果；先复用业务已有结果日志，不为本任务扩展公共 DTO。
+5. 若新证据指向连接侧，另行限定同一直播时段的 guest/external 对照、或 im/fetch 初始化差异验证；外部凭据只由后端本地注入，日志只记录模式，不把外部 Cookie 当作必然登录。遇到登录/验证码/访问限制交用户处理。当前没有许可/依赖新增提案，也没有依据直接引入上游初始化/JS/浏览器服务。
+
+---
+
+# 入站 MALFORMED 解码修复与首次有效接收（2026-11-02，历史轮次）
 
 本节为最新交接；下方 2026-11-01 页面初始化及首轮记录保留历史背景，不能覆盖本节实测结果。
 
