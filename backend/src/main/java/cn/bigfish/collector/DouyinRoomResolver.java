@@ -26,6 +26,7 @@ public final class DouyinRoomResolver {
     private final Clock clock;
     private final PageFetcher fetcher;
     private final AtomicInteger inFlight = new AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicLong requests = new java.util.concurrent.atomic.AtomicLong();
 
     public DouyinRoomResolver() { this(Clock.systemUTC(), new JdkPageFetcher(Duration.ofSeconds(10), 2 * 1024 * 1024)); }
     DouyinRoomResolver(Clock clock, PageFetcher fetcher) { this.clock = clock; this.fetcher = fetcher; }
@@ -37,9 +38,12 @@ public final class DouyinRoomResolver {
         if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
         inFlight.incrementAndGet();
         try {
+            requests.incrementAndGet();
             Page page = fetcher.get(room.pageUri(), credentials.headers(room));
             if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
             credentials.validate(clock.instant());
+            if ((page.status == 200 || page.status == 401 || page.status == 403)
+                    && page.contentType.toLowerCase(Locale.ROOT).startsWith("text/html")) DouyinRoomPage.checkGate(page.body);
             if (page.status == 401 || page.status == 403) throw new DouyinFailure(AUTH_REQUIRED);
             if (page.status == 451) throw new DouyinFailure(REGION_RESTRICTED);
             if (page.status == 429) throw new DouyinFailure(RATE_LIMITED);
@@ -52,6 +56,7 @@ public final class DouyinRoomResolver {
         } finally { inFlight.decrementAndGet(); }
     }
     public int inFlightRequests() { return inFlight.get(); }
+    public long requestsStarted() { return requests.get(); }
 
     @FunctionalInterface interface PageFetcher {
         Page get(URI uri, Map<String, String> headers) throws DouyinFailure, InterruptedException;

@@ -21,6 +21,7 @@ public final class WebDouyinConnectionProvider implements DouyinConnectionProvid
     private final Clock clock;
     private final Duration signingTimeout;
     private volatile Thread signingWorker;
+    private final java.util.concurrent.atomic.AtomicLong signingAttempts = new java.util.concurrent.atomic.AtomicLong();
 
     public WebDouyinConnectionProvider(CredentialSource credentials, DouyinSigner signer) {
         this(credentials, signer, new DouyinRoomResolver(), Clock.systemUTC());
@@ -37,6 +38,10 @@ public final class WebDouyinConnectionProvider implements DouyinConnectionProvid
     }
 
     @Override public DouyinConnection resolve(String input) throws Exception {
+        return resolve(input, null);
+    }
+
+    @Override public DouyinConnection resolve(String input, String expectedInternalRoomId) throws Exception {
         DouyinRoomInput requested = DouyinRoomInput.parse(input);
         DouyinCredentials current;
         try { current = credentials.current(); }
@@ -46,6 +51,9 @@ public final class WebDouyinConnectionProvider implements DouyinConnectionProvid
         // Do not touch the platform when receive cannot proceed. Room-only validation uses resolver directly.
         requireSigner(signer);
         DouyinRoom room = resolver.resolve(requested.webRoomId(), current);
+        if (expectedInternalRoomId != null && !expectedInternalRoomId.equals(room.internalRoomId())) {
+            return DouyinConnection.ended(room.internalRoomId());
+        }
         if (!room.live()) return DouyinConnection.ended(room.internalRoomId());
         if (Thread.currentThread().isInterrupted()) throw new InterruptedException();
         var request = new DouyinSigner.Request(room.internalRoomId(), current.userUniqueId(), current.userAgent(),
@@ -66,6 +74,7 @@ public final class WebDouyinConnectionProvider implements DouyinConnectionProvid
             if (signingWorker != null && signingWorker.isAlive()) throw new DouyinFailure(SIGNER_FAILED);
             worker = Thread.ofVirtual().name("bigfish-douyin-sign").unstarted(task);
             signingWorker = worker;
+            signingAttempts.incrementAndGet();
             worker.start();
         }
         try { return task.get(signingTimeout.toMillis(), TimeUnit.MILLISECONDS); }
@@ -115,5 +124,6 @@ public final class WebDouyinConnectionProvider implements DouyinConnectionProvid
     }
     public int inFlightRequests() { return resolver.inFlightRequests(); }
     public int signingWorkers() { var worker = signingWorker; return worker != null && worker.isAlive() ? 1 : 0; }
+    public long signingAttempts() { return signingAttempts.get(); }
     @Override public String toString() { return "WebDouyinConnectionProvider[redacted]"; }
 }

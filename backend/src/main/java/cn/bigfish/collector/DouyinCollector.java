@@ -30,17 +30,18 @@ public final class DouyinCollector extends AbstractCollector {
         while (context.active.get()) {
             long started = System.nanoTime();
             try {
-                DouyinConnection connection = provider.resolve(webRoom);
+                DouyinConnection connection = provider.resolve(webRoom, resolvedRoom);
                 if (!context.active.get()) return;
                 // A new broadcast in the same web room requires a new backend session.
                 if (resolvedRoom != null && !resolvedRoom.equals(connection.internalRoomId)) {
+                    diagnostics().increment(ROOM_CHANGED);
                     context.accept(ended(resolvedRoom), clock.instant()); return;
                 }
                 resolvedRoom = connection.internalRoomId;
                 if (connection.ended) { context.accept(ended(resolvedRoom), clock.instant()); return; }
                 CollectorSocket socket = sockets.get(); context.attach(socket);
                 if (!context.active.get()) return;
-                socket.open(connection);
+                diagnostics().increment(HANDSHAKE_ATTEMPT); socket.open(connection);
                 if (!context.active.get()) return;
                 context.transition(State.CONNECTED);
                 diagnostics().increment(CONNECTED);

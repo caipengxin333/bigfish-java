@@ -18,13 +18,11 @@ final class DouyinRoomPage {
     private static final Pattern SCRIPTS = Pattern.compile("<script\\b([^>]*)>(.*?)</script\\s*>", Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
     private static final Pattern RENDER = Pattern.compile("\\bid\\s*=\\s*['\"]RENDER_DATA['\"]", Pattern.CASE_INSENSITIVE);
     private static final Pattern STORE = Pattern.compile("\"roomStore\"\\s*:\\s*(\\{)");
+    private static final Pattern TITLE = Pattern.compile("<title\\s*>([^<]{0,128})</title\\s*>", Pattern.CASE_INSENSITIVE);
 
     static DouyinRoom parse(String html, DouyinRoomInput requested) throws DouyinFailure {
         if (html == null || html.length() > 2 * 1024 * 1024) throw new DouyinFailure(RESPONSE_TOO_LARGE);
-        // Only explicit gate documents are classified. Unrecognized variants fail closed as page changes.
-        if (html.contains("<title>验证码</title>") || html.contains("<title>安全验证</title>")) throw new DouyinFailure(CHALLENGE_REQUIRED);
-        if (html.contains("<title>地区限制</title>")) throw new DouyinFailure(REGION_RESTRICTED);
-        if (html.contains("<title>登录抖音</title>")) throw new DouyinFailure(AUTH_REQUIRED);
+        checkGate(html);
         List<DouyinRoom> found = new ArrayList<>();
         var scripts = SCRIPTS.matcher(html);
         while (scripts.find()) {
@@ -43,6 +41,16 @@ final class DouyinRoomPage {
         }
         if (found.isEmpty() || found.stream().anyMatch(room -> !room.equals(found.getFirst()))) throw new DouyinFailure(PAGE_STRUCTURE_CHANGED);
         return found.getFirst();
+    }
+
+    static void checkGate(String html) throws DouyinFailure {
+        if (html == null || html.length() > 2 * 1024 * 1024) throw new DouyinFailure(RESPONSE_TOO_LARGE);
+        var title = TITLE.matcher(html);
+        if (!title.find()) return;
+        String text = title.group(1).strip();
+        if (text.matches("(?:验证码|安全验证)(?:\\s*[-—]\\s*抖音)?")) throw new DouyinFailure(CHALLENGE_REQUIRED);
+        if (text.equals("地区限制")) throw new DouyinFailure(REGION_RESTRICTED);
+        if (text.equals("登录抖音")) throw new DouyinFailure(AUTH_REQUIRED);
     }
 
     private static void scanStrings(JsonNode node, DouyinRoomInput request, List<DouyinRoom> found, int depth) throws Exception {

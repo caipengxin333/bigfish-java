@@ -9,6 +9,11 @@ package cn.bigfish.collector;
 public interface DouyinConnectionProvider {
     DouyinConnection resolve(String webRoomId) throws Exception;
 
+    /** Allows a resolver to detect a new broadcast before doing unnecessary signing work. */
+    default DouyinConnection resolve(String webRoomId, String expectedInternalRoomId) throws Exception {
+        return resolve(webRoomId);
+    }
+
     /** Permanent configuration/license/unsupported-room problem, not a transient network failure. */
     final class UnavailableException extends Exception {
         public UnavailableException() { super("Douyin connection provider unavailable"); }

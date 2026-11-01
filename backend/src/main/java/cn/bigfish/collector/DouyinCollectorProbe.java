@@ -2,7 +2,6 @@ package cn.bigfish.collector;
 
 import cn.bigfish.contract.CollectorPort;
 import java.time.Instant;
-import java.util.ServiceLoader;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Function;
@@ -27,6 +26,7 @@ public final class DouyinCollectorProbe {
     }
 
     static int run(Function<String, String> env) throws Exception {
+        long started = System.nanoTime();
         Config config = configuration(env);
         var resolver = new DouyinRoomResolver();
         if (config.action.equals("resolve")) {
@@ -35,22 +35,23 @@ public final class DouyinCollectorProbe {
                 System.out.println("mode=DOUYIN action=resolve state=" + (room.live() ? "LIVE" : "ENDED")
                         + " roomResolved=true comments=0 gifts=0 receiveAttempted=false");
                 return 0;
-            } finally { System.out.println("httpInFlight=" + resolver.inFlightRequests()); }
+            } finally { System.out.println("httpRequests=" + resolver.requestsStarted() + " httpInFlight=" + resolver.inFlightRequests()
+                    + " elapsedMs=" + (System.nanoTime() - started) / 1_000_000); }
         }
         if (!"true".equals(env.apply("BIGFISH_DOUYIN_SIGNER_REVIEWED"))) throw new DouyinFailure(SIGNER_UNAVAILABLE);
         // Explicit opt-in is checked before loading user-provided executable extensions.
-        var signers = ServiceLoader.load(DouyinSigner.class).iterator();
-        if (!signers.hasNext()) throw new DouyinFailure(SIGNER_UNAVAILABLE);
-        var signer = signers.next();
-        if (signers.hasNext()) throw new DouyinFailure(SIGNER_UNAVAILABLE);
-        WebDouyinConnectionProvider.requireSigner(signer);
+        var signer = DouyinSigners.load();
         var provider = new WebDouyinConnectionProvider(() -> credentials(env), signer, resolver, java.time.Clock.systemUTC());
         // Validate with precise errors before starting; the supplier is then re-evaluated on each attempt.
         credentials(env);
         var attempts = new AtomicInteger(); var comments = new LongAdder(); var gifts = new LongAdder(); var giftUnits = new LongAdder();
-        var collector = new DouyinCollector(room -> {
-            if (attempts.incrementAndGet() > 3) throw new DouyinFailure(ATTEMPT_LIMIT);
-            return provider.resolve(room);
+        var follows = new LongAdder(); var entrances = new LongAdder(); var likes = new LongAdder();
+        var collector = new DouyinCollector(new DouyinConnectionProvider() {
+            @Override public DouyinConnection resolve(String room) throws Exception { return resolve(room, null); }
+            @Override public DouyinConnection resolve(String room, String expectedRoom) throws Exception {
+                if (attempts.incrementAndGet() > 3) throw new DouyinFailure(ATTEMPT_LIMIT);
+                return provider.resolve(room, expectedRoom);
+            }
         });
         Thread shutdown = new Thread(collector::stop, "bigfish-douyin-probe-shutdown");
         Runtime.getRuntime().addShutdownHook(shutdown);
@@ -62,6 +63,9 @@ public final class DouyinCollectorProbe {
                     gifts.increment();
                     if (event.payload().get("quantity") instanceof Number quantity) giftUnits.add(quantity.longValue());
                 }
+                if (event.type().name().equals("FOLLOW")) follows.increment();
+                if (event.type().name().equals("ENTRANCE")) entrances.increment();
+                if (event.type().name().equals("LIKE")) likes.increment();
             });
             long deadline = System.nanoTime() + config.seconds * 1_000_000_000L;
             while (System.nanoTime() < deadline) {
@@ -85,6 +89,10 @@ public final class DouyinCollectorProbe {
             System.out.println("mode=DOUYIN action=receive terminal=" + finalState + " stopped=" + collector.state()
                     + " connections=" + d.count(CollectorDiagnostics.Counter.CONNECTED)
                     + " comments=" + comments.sum() + " gifts=" + gifts.sum() + " giftUnits=" + giftUnits.sum()
+                    + " follows=" + follows.sum() + " entrances=" + entrances.sum() + " likes=" + likes.sum()
+                    + " httpRequests=" + resolver.requestsStarted() + " signingAttempts=" + provider.signingAttempts()
+                    + " handshakeAttempts=" + d.count(CollectorDiagnostics.Counter.HANDSHAKE_ATTEMPT)
+                    + " elapsedMs=" + (System.nanoTime() - started) / 1_000_000
                     + " ack=" + d.count(CollectorDiagnostics.Counter.ACK) + " heartbeat=" + d.count(CollectorDiagnostics.Counter.HEARTBEAT)
                     + " duplicate=" + d.count(CollectorDiagnostics.Counter.DUPLICATE)
                     + " malformed=" + d.count(CollectorDiagnostics.Counter.MALFORMED)
