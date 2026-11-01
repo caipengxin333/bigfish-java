@@ -44,5 +44,6 @@ public final class AudioAssets {
     }
     public synchronized void remove(String id) { entries.remove(id); }
     public synchronized void clear() { entries.clear(); }
+    public synchronized int size() { prune(); return entries.size(); }
     private void prune() { entries.entrySet().removeIf(e -> !e.getValue().expiresAt().isAfter(clock.instant())); }
 }
