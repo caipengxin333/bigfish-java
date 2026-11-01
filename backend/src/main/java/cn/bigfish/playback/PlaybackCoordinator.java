@@ -2,6 +2,9 @@ package cn.bigfish.playback;
 
 import cn.bigfish.contract.*;
 import cn.bigfish.scheduler.BoundedPriorityQueue;
+import cn.bigfish.management.diagnostics.RuntimeDiagnostics;
+import cn.bigfish.management.diagnostics.RuntimeDiagnostics.Stage;
+import cn.bigfish.management.diagnostics.RuntimeDiagnostics.Reason;
 import java.time.*;
 import java.util.*;
 
@@ -20,6 +23,8 @@ public final class PlaybackCoordinator {
     private final Clock clock;
     private final AudioAssets assets;
     private final BoundedPriorityQueue<Queued> queue;
+    private RuntimeDiagnostics diagnostics;
+    private Reason revocation = Reason.SESSION_STOPPED;
     private String sessionId = "";
     private Peer player;
     private String playerId;
@@ -32,11 +37,28 @@ public final class PlaybackCoordinator {
     private Duration currentDuration=Duration.ofSeconds(25);
     public PlaybackCoordinator(Clock clock, AudioAssets assets) {
         this.clock = clock; this.assets = assets;
-        queue = new BoundedPriorityQueue<>(q -> assets.remove(q.task().taskId()));
+        diagnostics = new RuntimeDiagnostics(clock);
+        queue = BoundedPriorityQueue.withReasons((q,reason) -> {
+            assets.remove(q.task().taskId());
+            trace(q.task(),reason==BoundedPriorityQueue.DiscardReason.CLEARED ? Stage.CANCELLED : Stage.DROPPED,
+                switch(reason) {
+                    case EXPIRED -> Reason.TASK_EXPIRED;
+                    case FULL -> Reason.QUEUE_FULL;
+                    case CAPACITY_REDUCED -> Reason.CAPACITY_REDUCED;
+                    case INVALIDATED -> Reason.PLAYER_CHANGED;
+                    case CLEARED -> revocation;
+                });
+        });
+    }
+    /** Installed once by the engine before a session starts; no listener calls back into the engine. */
+    public synchronized void trackWith(RuntimeDiagnostics recorder) {
+        if (!sessionId.isEmpty()) throw new IllegalStateException("SESSION_ACTIVE");
+        diagnostics = Objects.requireNonNull(recorder);
     }
     public synchronized void begin(String id) {
         stop("NEW_SESSION");
         sessionId = id;
+        diagnostics.begin(id);
         assets.begin(id);
     }
     public synchronized void hello(Peer peer, String id) {
@@ -68,10 +90,15 @@ public final class PlaybackCoordinator {
         }
         switch (ack.state()) {
             case STARTED -> {
-                if (!started) { started = true; ackUntil = clock.instant().plus(currentDuration.plusSeconds(5)); }
+                if (!started) {
+                    started = true; ackUntil = clock.instant().plus(currentDuration.plusSeconds(5));
+                    trace(current,Stage.STARTED,Reason.NONE);
+                }
             }
-            case COMPLETED -> { if (started) finish(); }
-            case FAILED, CANCELLED -> finish();
+            case COMPLETED -> { if (started) finish(Stage.COMPLETED,Reason.NONE); }
+            // Never store the client-controlled errorCode or timestamp.
+            case FAILED -> finish(Stage.FAILED,Reason.PLAYER_FAILED);
+            case CANCELLED -> finish(Stage.CANCELLED,Reason.PLAYER_CANCELLED);
         }
     }
     public synchronized boolean enqueue(PlaybackTask task, AudioAssets.Content content, int capacity, long expectedEpoch) {
@@ -79,10 +106,19 @@ public final class PlaybackCoordinator {
     }
     public synchronized boolean enqueue(PlaybackTask task, AudioAssets.Content content, int capacity, long expectedEpoch, Duration duration) {
         expireLease();
-        if (duration==null || duration.isNegative() || duration.isZero() || duration.compareTo(Duration.ofSeconds(25))>0) return false;
-        if (!task.sessionId().equals(sessionId) || epoch != expectedEpoch || !isReady()) return false;
-        if (!assets.register(task.taskId(), sessionId, task.expiresAt(), content)) return false;
-        return queue.offer(new Queued(task,duration), capacity, clock.instant());
+        if (duration==null || duration.isNegative() || duration.isZero() || duration.compareTo(Duration.ofSeconds(25))>0) {
+            trace(task,Stage.DROPPED,Reason.INVALID_AUDIO); return false;
+        }
+        if (!task.sessionId().equals(sessionId) || epoch != expectedEpoch) {
+            trace(task,Stage.CANCELLED,Reason.PLAYER_CHANGED); return false;
+        }
+        if (!isReady()) { trace(task,Stage.DROPPED,Reason.PLAYER_NOT_READY); return false; }
+        if (!assets.register(task.taskId(), sessionId, task.expiresAt(), content)) {
+            trace(task,Stage.DROPPED,task.expiresAt().isAfter(clock.instant()) ? Reason.AUDIO_REJECTED : Reason.TASK_EXPIRED); return false;
+        }
+        boolean accepted = queue.offer(new Queued(task,duration), capacity, clock.instant());
+        if (accepted) trace(task,Stage.PLAYBACK_WAIT,Reason.NONE);
+        return accepted;
     }
     public synchronized void tick(int capacity) {
         expireLease();
@@ -96,10 +132,12 @@ public final class PlaybackCoordinator {
             var next = queue.poll(now);
             // Reserve both the STARTED acknowledgement budget and the completion grace period.
             while (next != null && !now.plus(next.duration()).plusSeconds(10).isBefore(next.task().expiresAt())) {
-                assets.remove(next.task().taskId()); next=queue.poll(now);
+                assets.remove(next.task().taskId()); trace(next.task(),Stage.DROPPED,Reason.INSUFFICIENT_PLAYBACK_TTL);
+                next=queue.poll(now);
             }
             if (next != null) {
                 currentDuration=next.duration(); current = next.task(); started = false; ackUntil = now.plusSeconds(5);
+                trace(current,Stage.PLAYBACK_SENT,Reason.NONE);
                 send("PLAY_TASK", current);
             }
         }
@@ -123,6 +161,7 @@ public final class PlaybackCoordinator {
         expireLease();
         return new Status(player != null, isReady(), generation, queue.size(), current != null, epoch);
     }
+    public synchronized boolean hasStarted() { return current!=null && started; }
     private boolean owns(Peer peer, String session, String id, long lease) {
         expireLease();
         return player != null && player.id().equals(peer.id()) && sessionId.equals(session)
@@ -130,8 +169,20 @@ public final class PlaybackCoordinator {
     }
     private boolean isReady() { return player != null && ready; }
     private void expireLease() { if (player != null && !leaseUntil.isAfter(clock.instant())) revoke("LEASE_EXPIRED"); }
-    private void finish() { assets.remove(current.taskId()); current = null; started = false; }
+    private void finish(Stage stage, Reason reason) {
+        trace(current,stage,reason); assets.remove(current.taskId()); current = null; started = false;
+    }
     private void revoke(String reason) {
+        revocation = switch (reason) {
+            case "PLAYBACK_TIMEOUT" -> current!=null && !current.expiresAt().isAfter(clock.instant()) ? Reason.TASK_EXPIRED
+                : started ? Reason.COMPLETION_TIMEOUT : Reason.START_ACK_TIMEOUT;
+            case "PLAYER_DISCONNECTED" -> Reason.PLAYER_DISCONNECTED;
+            case "LEASE_EXPIRED" -> Reason.LEASE_EXPIRED;
+            case "PLAYER_BACKPRESSURE" -> Reason.PLAYER_BACKPRESSURE;
+            default -> Reason.SESSION_STOPPED;
+        };
+        if (current != null) trace(current,revocation==Reason.START_ACK_TIMEOUT || revocation==Reason.COMPLETION_TIMEOUT
+            ? Stage.FAILED : Stage.CANCELLED,revocation);
         if (current != null && player != null) player.send("CANCEL_TASK", sessionId, Map.of("taskId", current.taskId(), "reason", reason));
         if (player != null) {
             retiringPeer = player.id(); fencedUntil = leaseUntil;
@@ -139,6 +190,9 @@ public final class PlaybackCoordinator {
         }
         player = null; playerId = null; ready = false; current = null; started = false;
         queue.clear(); assets.clear(); epoch++;
+    }
+    private void trace(PlaybackTask task, Stage stage, Reason reason) {
+        diagnostics.mark(task.sessionId(),task.taskId(),stage,reason);
     }
     private void send(String type, Object payload) {
         if (player != null && !player.send(type, sessionId, payload)) revoke("PLAYER_BACKPRESSURE");

@@ -1,6 +1,6 @@
 # DeepSeek 接入与独立验收
 
-更新日期：2026-10-30。使用仓库现有 Spring AI 1.1.8 `OpenAiApi`，不新增依赖。默认 MOCK，无 Key 可启动；本轮仅完成本地替身验证，尚无供应商真实生成成功记录。
+维护更新：2026-11-01。用户已确认 DeepSeek/NLS/模拟事件基本联调成功，集成记录见 [第二轮交接](../handoffs/phase2-integration.md)；本窗口未独立追加真实供应商请求。第三轮保留现有 Spring AI 1.1.8 适配器，新增运行阶段诊断与持续故障恢复本地测试，详见 [运行稳定性](../runtime-stability.md)。默认 MOCK、无 Key 可启动；以下独立入口说明仍适用。
 
 ## 凭据与 IDEA
 
@@ -126,7 +126,7 @@ curl --fail-with-body http://127.0.0.1:18081/api/v1/sessions \
 
 会话启动并不代表生成通过。注入 mock COMMENT 前需要有效的 WebSocket PLAYER_READY；结束后调用现有 stop。礼物仍走模板。当前本地测试音不包含人声，不能据此声称真实 TTS 通过。独立验收不依赖前端/播放端，优先用于短请求验证。
 
-连接检测 REST、前端各层状态、运行失败原因展示仍待集成窗口接线；详见 [本轮交接](../handoffs/phase2-deepseek.md)。本任务没有新增公共 API、DTO 或依赖。
+第二轮集成已接入 `/api/v1/providers/deepseek/check` 和 RuntimeView 的 lastError/lastErrorAt；第三轮新增的阶段轨迹仅由 `RuntimeEngine.diagnostics()` 内部读取，新的公共字段提案见 [稳定性交接](../handoffs/phase3-stability.md)。本分支未新增公共 API、DTO 或依赖；读取诊断不发起供应商请求。
 
 ## 协议核对来源
 
