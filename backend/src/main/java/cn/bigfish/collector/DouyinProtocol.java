@@ -14,7 +14,8 @@ import cn.bigfish.collector.InboundDiagnostics.Shape;
 
 /** Experimental field adapter. Source/limitations are recorded in docs/handoffs/collector.md. */
 final class DouyinProtocol {
-    record Batch(byte[] acknowledgement, List<IncomingMessage> messages) {
+    record Batch(byte[] acknowledgement, List<IncomingMessage> messages, List<InboundDiagnostics.Trace> traces,
+                 InboundDiagnostics.Trace frameTrace) {
         @Override public String toString() { return "Batch[redacted]"; }
     }
     private final int maxBytes;
@@ -25,6 +26,12 @@ final class DouyinProtocol {
     }
 
     Batch decode(byte[] bytes, String resolvedRoom) throws IOException {
+        try (var scope = diagnostics.inbound().use(diagnostics.inbound().nextFrame())) {
+            return decodeFrame(bytes, resolvedRoom);
+        }
+    }
+
+    private Batch decodeFrame(byte[] bytes, String resolvedRoom) throws IOException {
         Stage stage = Stage.PUSH;
         int length = bytes.length;
         var trace = diagnostics.inbound();
@@ -34,10 +41,10 @@ final class DouyinProtocol {
             trace.record(stage, Reason.OK, new Shape(length, 0, 0, 0, Encoding.NONE, false, push.shape()));
             stage = Stage.PAYLOAD;
             String type = push.text(7);
-            if (type.equals("hb") || type.equals("ack")) return new Batch(null, List.of());
+            if (type.equals("hb") || type.equals("ack")) return new Batch(null, List.of(), List.of(), trace.trace());
             if (!type.isEmpty() && !type.equals("msg")) {
                 trace.record(stage, Reason.UNKNOWN_TYPE, null);
-                diagnostics.increment(UNKNOWN); return new Batch(null, List.of());
+                diagnostics.increment(UNKNOWN); return new Batch(null, List.of(), List.of(), trace.trace());
             }
             byte[] payload = push.bytes(8);
             String encoding = push.text(6);
@@ -88,16 +95,21 @@ final class DouyinProtocol {
             var entries = response.repeated(1, 512);
             trace.record(stage, Reason.OK, new Shape(length, 0, 0, entries.size(), label, gzip, response.shape()));
             var messages = new ArrayList<IncomingMessage>();
+            var traces = new ArrayList<InboundDiagnostics.Trace>();
+            int index = 0;
+            var frameTrace = trace.trace();
             for (var entry : entries) {
-                byte[] message;
-                try { message = entry.bytes(1); }
-                catch (RuntimeException exception) {
-                    trace.failure(stage, Kind.NONE, exception, 0); diagnostics.error(MALFORMED, 0); continue;
+                try (var scope = trace.use(frameTrace.message(++index))) {
+                    byte[] message;
+                    try { message = entry.bytes(1); }
+                    catch (RuntimeException exception) {
+                        trace.failure(stage, Kind.NONE, exception, 0); diagnostics.error(MALFORMED, 0); continue;
+                    }
+                    IncomingMessage decoded = message(message, resolvedRoom);
+                    if (decoded != null) { messages.add(decoded); traces.add(trace.trace()); }
                 }
-                IncomingMessage decoded = message(message, resolvedRoom);
-                if (decoded != null) messages.add(decoded);
             }
-            return new Batch(ack, List.copyOf(messages));
+            return new Batch(ack, List.copyOf(messages), List.copyOf(traces), frameTrace);
         } catch (IOException exception) {
             trace.record(stage, Reason.INVALID_GZIP, Shape.bytes(length)); throw exception;
         } catch (RuntimeException exception) {
@@ -145,6 +157,7 @@ final class DouyinProtocol {
             var envelope = ProtoWire.parse(bytes);
             diagnostics.inbound().record(stage, Reason.OK, Shape.bytes(bytes.length));
             String method = envelope.text(1);
+            diagnostics.inbound().methodSeen(method); // Count before any business type filtering.
             String kind = switch (method) {
                 case "WebcastChatMessage" -> "COMMENT";
                 case "WebcastGiftMessage" -> "GIFT";

@@ -45,7 +45,8 @@ final class EventNormalizer {
                 payload.put("content", input.content());
             }
             case GIFT -> {
-                require(!input.giftId().isBlank() && input.giftId().length() <= 100
+                if (input.giftId().isBlank()) throw ProtoWire.fault(InboundDiagnostics.Reason.MISSING_GIFT_ID, 0, -1, 0);
+                require(input.giftId().length() <= 100
                         && input.giftName().length() <= 512 && input.cumulativeQuantity() >= 0
                         && (input.unitValue() == null || input.unitValue() >= 0));
                 cumulative = Math.max(1, input.cumulativeQuantity());
@@ -57,7 +58,11 @@ final class EventNormalizer {
                     Long old = combos.get(combo, receivedAt);
                     previous = old == null ? 0 : old;
                 }
-                if (cumulative <= previous) { diagnostics.increment(DUPLICATE); return Optional.empty(); }
+                if (cumulative <= previous) {
+                    diagnostics.increment(DUPLICATE);
+                    diagnostics.inbound().record(InboundDiagnostics.Stage.DEDUP, InboundDiagnostics.Reason.DUPLICATE_COMBO,
+                            InboundDiagnostics.Kind.GIFT, null); return Optional.empty();
+                }
                 payload.put("giftId", input.giftId());
                 payload.put("giftName", input.giftName());
                 payload.put("quantity", Math.toIntExact(cumulative - previous));
@@ -69,7 +74,11 @@ final class EventNormalizer {
             case ENTRANCE, FOLLOW -> { }
         }
         String eventId = input.messageId().isBlank() ? fallbackId(input) : input.messageId();
-        if (messages.get(eventId, receivedAt) != null) { diagnostics.increment(DUPLICATE); return Optional.empty(); }
+        if (messages.get(eventId, receivedAt) != null) {
+            diagnostics.increment(DUPLICATE);
+            diagnostics.inbound().record(InboundDiagnostics.Stage.DEDUP, InboundDiagnostics.Reason.DUPLICATE_ID,
+                    InboundDiagnostics.eventKind(input.kind()), null); return Optional.empty();
+        }
         messages.put(eventId, true, receivedAt);
         if (combo != null) combos.put(combo, cumulative, receivedAt);
         // Map.copyOf rejects the contract's legitimate unknown unitValue=null.

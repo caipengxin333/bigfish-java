@@ -147,5 +147,8 @@ public final class WebDouyinConnectionProvider implements DouyinConnectionProvid
     public long requestsStarted() { return resolver.requestsStarted(); }
     public int signingWorkers() { var worker = signingWorker; return worker != null && worker.isAlive() ? 1 : 0; }
     public long signingAttempts() { return signingAttempts.get(); }
+    InboundDiagnostics.Credentials credentialMode() {
+        return guest == null ? InboundDiagnostics.Credentials.EXTERNAL : InboundDiagnostics.Credentials.GUEST;
+    }
     @Override public String toString() { return "WebDouyinConnectionProvider[redacted]"; }
 }

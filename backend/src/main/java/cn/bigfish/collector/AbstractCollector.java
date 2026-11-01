@@ -40,6 +40,7 @@ abstract class AbstractCollector implements CollectorPort {
         if (run != null && (run.active.get() || run.source.isAlive() || run.dispatcher.isAlive())) {
             throw new IllegalStateException("Previous collector workers have not stopped");
         }
+        diagnostics.inbound().begin(sessionId, clock, mode().equals("DOUYIN"));
         run = new Run(roomId, sessionId, sink);
         state = State.CONNECTING;
         run.dispatcher.start(); run.source.start();
@@ -53,7 +54,9 @@ abstract class AbstractCollector implements CollectorPort {
         // A control packet/error already waiting for this monitor must not undo an explicit stop.
         if (!context.active.get() && terminal != State.STOPPED) return;
         context.active.set(false);
-        context.events.clear();
+        QueuedEvent discarded;
+        while ((discarded = context.events.poll()) != null)
+            context.outcome(discarded, InboundDiagnostics.Stage.DELIVERY_QUEUE, InboundDiagnostics.Reason.CANCELLED);
         context.source.interrupt(); context.dispatcher.interrupt();
         context.closeConnection();
         state = terminal;
@@ -61,11 +64,13 @@ abstract class AbstractCollector implements CollectorPort {
 
     protected abstract void collect(Run context) throws Exception;
 
+    private record QueuedEvent(LiveEvent event, InboundDiagnostics.Trace trace) { }
+
     protected final class Run {
         final String requestedRoom;
         final String sessionId;
         final AtomicBoolean active = new AtomicBoolean(true);
-        private final ArrayBlockingQueue<LiveEvent> events = new ArrayBlockingQueue<>(options.queueCapacity());
+        private final ArrayBlockingQueue<QueuedEvent> events = new ArrayBlockingQueue<>(options.queueCapacity());
         private final EventNormalizer normalizer;
         private final Thread source;
         private final Thread dispatcher;
@@ -86,39 +91,65 @@ abstract class AbstractCollector implements CollectorPort {
                 }
                 catch (Exception exception) {
                     if (active.get()) { diagnostics.error(CONNECT_FAILURE, elapsedMillis(started)); finish(this, State.FAILED); }
-                }
+                } finally { diagnostics.inbound().flushLogs(true); }
             });
             dispatcher = Thread.ofPlatform().daemon().name("bigfish-collector-dispatch").unstarted(() -> {
-                while (active.get()) {
-                    try {
-                        LiveEvent event = events.take();
-                        if (!active.get()) break;
-                        if (!event.receivedAt().plus(options.queueTtl()).isAfter(clock.instant())) {
-                            diagnostics.increment(EXPIRED); continue;
-                        }
-                        long started = System.nanoTime();
-                        try { sink.accept(event); diagnostics.increment(EMITTED); }
-                        catch (RuntimeException exception) { diagnostics.error(SINK_FAILURE, elapsedMillis(started)); }
-                    } catch (InterruptedException exception) { Thread.currentThread().interrupt(); break; }
-                }
+                try {
+                    while (active.get()) {
+                        try {
+                            QueuedEvent queued = events.take();
+                            LiveEvent event = queued.event();
+                            if (!active.get()) { outcome(queued, InboundDiagnostics.Stage.DELIVERY_QUEUE, InboundDiagnostics.Reason.CANCELLED); break; }
+                            if (!event.receivedAt().plus(options.queueTtl()).isAfter(clock.instant())) {
+                                diagnostics.increment(EXPIRED);
+                                outcome(queued, InboundDiagnostics.Stage.DELIVERY_QUEUE, InboundDiagnostics.Reason.TTL); continue;
+                            }
+                            long started = System.nanoTime();
+                            try {
+                                sink.accept(event); diagnostics.increment(EMITTED);
+                                outcome(queued, InboundDiagnostics.Stage.DISPATCH, InboundDiagnostics.Reason.SINK_RETURNED);
+                            } catch (RuntimeException exception) {
+                                diagnostics.error(SINK_FAILURE, elapsedMillis(started));
+                                outcome(queued, InboundDiagnostics.Stage.DISPATCH, InboundDiagnostics.Reason.SINK_FAILED);
+                            }
+                        } catch (InterruptedException exception) { Thread.currentThread().interrupt(); break; }
+                    }
+                } finally { diagnostics.inbound().flushLogs(true); }
             });
         }
 
+        private void outcome(QueuedEvent queued, InboundDiagnostics.Stage stage, InboundDiagnostics.Reason reason) {
+            try (var scope = diagnostics.inbound().use(queued.trace())) {
+                diagnostics.inbound().record(stage, reason, InboundDiagnostics.eventKind(queued.event().type().name()), null);
+            }
+        }
+
         void accept(IncomingMessage input, Instant receivedAt) {
+            accept(input, receivedAt, diagnostics.inbound().trace());
+        }
+
+        void accept(IncomingMessage input, Instant receivedAt, InboundDiagnostics.Trace trace) {
             if (!active.get()) return;
             if (input.kind().equals("ENDED")) { diagnostics.increment(ENDED); finish(this, State.ENDED); return; }
             long started = System.nanoTime();
-            try {
-                normalizer.normalize(input, receivedAt).ifPresent(event -> {
-                    diagnostics.inbound().record(InboundDiagnostics.Stage.NORMALIZE, InboundDiagnostics.Reason.OK,
-                            InboundDiagnostics.Kind.valueOf(event.type().name()), null);
-                    synchronized (AbstractCollector.this) {
-                        if (active.get() && !events.offer(event)) diagnostics.increment(QUEUE_FULL);
-                    }
-                });
-            } catch (RuntimeException exception) {
-                diagnostics.inbound().record(InboundDiagnostics.Stage.NORMALIZE, InboundDiagnostics.Reason.INVALID_EVENT, null);
-                diagnostics.error(MALFORMED, (System.nanoTime() - started) / 1_000_000);
+            try (var scope = diagnostics.inbound().use(trace)) {
+                try {
+                    normalizer.normalize(input, receivedAt).ifPresent(event -> {
+                        diagnostics.inbound().record(InboundDiagnostics.Stage.NORMALIZE, InboundDiagnostics.Reason.OK,
+                                InboundDiagnostics.eventKind(event.type().name()), null);
+                        var queued = new QueuedEvent(event, trace);
+                        synchronized (AbstractCollector.this) {
+                            if (!active.get()) outcome(queued, InboundDiagnostics.Stage.DELIVERY_QUEUE, InboundDiagnostics.Reason.CANCELLED);
+                            else if (!events.offer(queued)) {
+                                diagnostics.increment(QUEUE_FULL);
+                                outcome(queued, InboundDiagnostics.Stage.DELIVERY_QUEUE, InboundDiagnostics.Reason.QUEUE_FULL);
+                            } else outcome(queued, InboundDiagnostics.Stage.DELIVERY_QUEUE, InboundDiagnostics.Reason.ENQUEUED);
+                        }
+                    });
+                } catch (RuntimeException exception) {
+                    diagnostics.inbound().failure(InboundDiagnostics.Stage.NORMALIZE, InboundDiagnostics.eventKind(input.kind()), exception, 0);
+                    diagnostics.error(MALFORMED, (System.nanoTime() - started) / 1_000_000);
+                }
             }
         }
 
