@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Live2D · 本地真实渲染验收</title><link rel="stylesheet" href="/src/style.css">
+<style>body{padding:16px;margin:auto;max-width:1000px}output{display:block;overflow-wrap:anywhere;padding:8px;background:#fff7dc} .avatar-area{margin:0}.live2d-host,.placeholder-host{height:390px}</style>
+<h1>Live2D 本机验收</h1><p>真实 Core / 模型 / WebGL / 人工测试音；会话传输为明确的浏览器 MOCK。只允许 avatar-assets 请求，不访问业务接口或云服务。</p>
+<div class="toolbar"><button id="connect">启用声音并连接 MOCK</button><button id="play">播放人工测试音</button><button id="cancel">播放后 500ms 取消</button><button id="disconnect">播放后 500ms 断开</button><button id="mount">切换挂载 / 释放</button><button id="missing">切换模型 404</button><button id="context">丢失 WebGL</button><button id="webgl">切换 WebGL 不可用</button></div>
+<output id="evidence">加载验收工具…</output><div id="avatar"></div>
+<script type="module">
+import { createApp, h, shallowRef, ref, nextTick } from 'vue'
+import StageAvatar from '../src/components/StageAvatar.vue'
+import { BrowserAudio } from '../src/stage/audio.ts'
+import { StageController } from '../src/stage/controller.ts'
+import { MockStageTransport, mockAudio } from '../src/mock/stage.ts'
+import { loadCore } from '../src/stage/live2d/core.ts'
+import { fetchAsset, modelUrl, parseManifest } from '../src/stage/live2d/assets.ts'
+const nativeFetch = window.fetch.bind(window)
+let missing = false, noWebgl = false, gl, maxMouth = 0, currentMouth = 0, updates = 0, releases = 0, textures = 0, lastCheck = '尚未执行取消/断开检查'
+window.fetch = (url, options) => {
+  if (!String(url).startsWith('/avatar-assets/')) throw new Error('Fixture blocks non-avatar requests')
+  if (missing && String(url) === modelUrl) return Promise.resolve(new Response('', {status:404}))
+  return nativeFetch(url, options)
+}
+const nativeContext = HTMLCanvasElement.prototype.getContext, tracked = new WeakSet()
+HTMLCanvasElement.prototype.getContext = function(...args) {
+  if (args[0] === 'webgl' && noWebgl) return null
+  const context = nativeContext.apply(this, args)
+  if (args[0] === 'webgl' && context) {
+    gl = context
+    if (!tracked.has(gl)) {
+      tracked.add(gl); const create = gl.createTexture.bind(gl), remove = gl.deleteTexture.bind(gl), live = new Set()
+      gl.createTexture = () => { const t = create(); if(t) { live.add(t); textures++ }; return t }
+      gl.deleteTexture = t => { if(live.delete(t)) textures--; remove(t) }
+    }
+  }
+  return context
+}
+await loadCore()
+const manifest = parseManifest(await fetchAsset(modelUrl, new AbortController().signal, 1024*1024))
+const { CubismModel } = await import('@cubism/model/cubismmodel')
+const modelUpdate = CubismModel.prototype.update, modelRelease = CubismModel.prototype.release
+CubismModel.prototype.update = function() {
+  const values = []
+  for(let i=0; i<this.getParameterCount(); i++) if(manifest.lips.includes(this.getParameterId(i).getString().s)) values.push(this.getParameterValueByIndex(i))
+  currentMouth = Math.max(0,...values); maxMouth = Math.max(maxMouth,currentMouth); updates++
+  return modelUpdate.call(this)
+}
+CubismModel.prototype.release = function() { releases++; return modelRelease.call(this) }
+const state = shallowRef(), mounted = ref(true)
+const controller = new StageController(new BrowserAudio(mockAudio), location.origin, v => {state.value=v})
+state.value={...controller.view}; let transport
+createApp({render:()=>mounted.value ? h(StageAvatar,{mouthLevel:state.value.level,speaking:state.value.playing,connected:state.value.connection==='leased'}) : h('p','形象已卸载，声音链路保持原状态。')}).mount('#avatar')
+function report() {
+  const root=document.documentElement, model=document.querySelector('[data-avatar-state]')?.dataset.avatarState ?? 'SVG/未挂载'
+  document.getElementById('evidence').textContent=`Core ${Live2DCubismCore.Version.csmGetVersion().toString(16)}；模型 ${model}；播放 ${state.value.playing}；音量 ${state.value.level.toFixed(3)}；实际嘴型 ${currentMouth.toFixed(3)} / 峰值 ${maxMouth.toFixed(3)}；模型更新 ${updates}；已释放模型 ${releases}；存活纹理 ${textures}；宽度 ${root.clientWidth}/${root.scrollWidth}；${lastCheck}；回执 ${state.value.history.slice(0,6).map(x=>x.code).join(',')}；404 ${missing}；禁用WebGL ${noWebgl}`
+}
+document.getElementById('connect').onclick=()=>{void controller.unlock();if(state.value.connection!=='leased'){transport=new MockStageTransport();controller.connect(transport)}}
+document.getElementById('play').onclick=()=>transport?.scenario('normal')
+for(const action of ['cancel','disconnect']) document.getElementById(action).onclick=()=>{transport?.scenario('normal');setTimeout(async()=>{transport?.scenario(action);await nextTick();lastCheck=`${action}: 播放=${state.value.playing}, 嘴型=${currentMouth.toFixed(3)}`;report()},500)}
+document.getElementById('mount').onclick=async()=>{mounted.value=!mounted.value;await nextTick();if(!mounted.value){const before=updates;setTimeout(()=>{lastCheck=`释放后模型更新 ${updates-before}；存活纹理 ${textures}`;report()},200)}}
+document.getElementById('missing').onclick=()=>{missing=!missing;report()}
+document.getElementById('context').onclick=()=>gl?.getExtension('WEBGL_lose_context')?.loseContext()
+document.getElementById('webgl').onclick=()=>{noWebgl=!noWebgl;report()}
+const timer=setInterval(()=>{controller.tick();report()},100)
+window.addEventListener('pagehide',()=>{clearInterval(timer);controller.dispose()},{once:true})
+report()
+</script></html>

@@ -18,11 +18,17 @@
     ],
     "skipLibCheck": true,
     "noEmit": true,
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "@cubism/*": [
+        "./.cubism-cache/*"
+      ]
+    }
   },
   "include": [
     "src/**/*.ts",
     "src/**/*.vue",
-    "vite.config.ts"
+    "vite.config.ts",
+    "vendor/cubism-core-types/*.d.ts"
   ]
 }
