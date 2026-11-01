@@ -81,14 +81,14 @@ public final class AlibabaNlsTokenClient implements AutoCloseable {
             request.transport.whenComplete((response, error) -> {
                 if (error != null) finish(request, null, safeCode(error));
                 else {
-                    try { finish(request, parse(response), null); }
+                    try { finish(request, parse(response, request.started), null); }
                     catch (Exception failure) { finish(request, null, safeCode(failure)); }
                 }
             });
         } catch (Exception error) { finish(request, null, safeCode(error)); }
         return request.result;
     }
-    private NlsTokenProvider.Token parse(HttpResponse<byte[]> response) {
+    private NlsTokenProvider.Token parse(HttpResponse<byte[]> response, long started) {
         int status = response.statusCode();
         if (status >= 300 && status < 400) throw new SpeechFailure(TOKEN_REQUEST_REJECTED);
         if (status == 429) throw new SpeechFailure(TOKEN_RATE_LIMITED);
@@ -110,12 +110,17 @@ public final class AlibabaNlsTokenClient implements AutoCloseable {
         if (status == 401 || status == 403) throw new SpeechFailure(TOKEN_AUTH_REJECTED);
         if (status != 200) throw new SpeechFailure(TOKEN_REQUEST_REJECTED);
         Instant now = clock.instant();
-        response.headers().firstValue("Date").ifPresent(date -> {
+        Instant reference = now;
+        String date = response.headers().firstValue("Date").orElse(null);
+        if (date != null) {
             try {
                 Instant server = ZonedDateTime.parse(date, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant();
                 if (Duration.between(server, now).abs().compareTo(Duration.ofMinutes(5)) > 0) throw new SpeechFailure(TOKEN_CLOCK_SKEW);
+                // Include all request elapsed time and Date's one-second precision conservatively.
+                Instant serverUpperBound = server.plusNanos(System.nanoTime() - started).plusSeconds(1);
+                if (serverUpperBound.isAfter(reference)) reference = serverUpperBound;
             } catch (java.time.format.DateTimeParseException ignored) { throw new SpeechFailure(TOKEN_RESPONSE_INVALID); }
-        });
+        }
         var token = document.path("Token");
         var id = token.path("Id"); var expires = token.path("ExpireTime");
         if (!token.isObject() || !id.isTextual() || !credential(id.textValue(), 4096)
@@ -125,8 +130,8 @@ public final class AlibabaNlsTokenClient implements AutoCloseable {
             expiration = Instant.ofEpochSecond(expires.longValue());
             Duration.between(now, expiration).toNanos(); // Reject unrepresentable/absurd lifetimes, not a guessed TTL.
         } catch (Exception ignored) { throw new SpeechFailure(TOKEN_RESPONSE_INVALID); }
-        if (!expiration.isAfter(now.plusSeconds(30))) throw new SpeechFailure(TOKEN_EXPIRED);
-        return new NlsTokenProvider.Token(id.textValue(), expiration);
+        if (!expiration.isAfter(reference.plusSeconds(30))) throw new SpeechFailure(TOKEN_EXPIRED);
+        return new NlsTokenProvider.Token(id.textValue(), expiration, Duration.between(reference, expiration));
     }
     private void finish(Request request, NlsTokenProvider.Token token, SpeechFailure.Code error) {
         synchronized (this) {

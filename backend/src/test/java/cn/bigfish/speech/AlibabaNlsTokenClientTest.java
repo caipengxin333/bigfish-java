@@ -96,6 +96,23 @@ class AlibabaNlsTokenClientTest {
         client.close(); client = make(Clock.fixed(now.minusSeconds(600), ZoneOffset.UTC));
         failure(issue(), TOKEN_CLOCK_SKEW);
     }
+    @Test void moderateClockLagCannotExtendServerAnchoredLifetime() throws Exception {
+        Clock lagging = Clock.fixed(now.minusSeconds(120), ZoneOffset.UTC);
+        client.close(); client = make(lagging);
+        handler.set(x -> respond(x, 200, valid().replace(Long.toString(now.plusSeconds(3600).getEpochSecond()),
+            Long.toString(now.plusSeconds(60).getEpochSecond()))));
+        var token = issue().toCompletableFuture().get(3,TimeUnit.SECONDS);
+        assertThat(token.expiresAt()).isEqualTo(now.plusSeconds(60));
+        assertThat(token.verifiedRemainingNanos()).isBetween(TimeUnit.SECONDS.toNanos(30), TimeUnit.SECONDS.toNanos(60));
+        AtomicLong ticker = new AtomicLong(1);
+        try (var provider = new RefreshingNlsTokenProvider(d -> CompletableFuture.completedFuture(token), lagging,
+                Duration.ofSeconds(1),Duration.ofSeconds(30),ticker::get)) {
+            assertThat(provider.acquire(Duration.ofSeconds(1)).toCompletableFuture().get(2,TimeUnit.SECONDS)).isSameAs(token);
+            ticker.addAndGet(TimeUnit.SECONDS.toNanos(61));
+            assertThat(provider.status()).isEqualTo(NlsTokenProvider.Status.EXPIRED);
+            assertThat(provider.diagnostics().remainingSeconds()).isZero();
+        }
+    }
     @Test void oversizedAndTricklingResponsesCannotEvadeBounds() {
         handler.set(x -> respond(x, 200, "x".repeat(16_385))); failure(issue(), TOKEN_RESPONSE_INVALID);
         handler.set(x -> {

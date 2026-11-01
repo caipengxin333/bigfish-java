@@ -104,7 +104,8 @@ public final class RefreshingNlsTokenProvider implements NlsTokenProvider {
             try {
                 if (token == null || token.expiresAt() == null || !token.expiresAt().isAfter(clock.instant().plus(refreshAhead)))
                     throw new IllegalArgumentException();
-                newLifetime = Duration.between(clock.instant(), token.expiresAt()).toNanos();
+                newLifetime = Math.min(Duration.between(clock.instant(), token.expiresAt()).toNanos(), token.verifiedRemainingNanos());
+                if (newLifetime <= refreshAhead.toNanos()) throw new IllegalArgumentException();
                 if (Objects.equals(rejectedValue, token.value())) error = TOKEN_REJECTED;
             } catch (Exception ignored) { error = TOKEN_REFRESH_FAILED; }
         }
