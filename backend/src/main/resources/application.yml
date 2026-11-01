@@ -28,3 +28,5 @@ management:
       show-details: never
 bigfish:
   data-dir: ${BIGFISH_DATA_DIR:./runtime}
+  avatar:
+    assets-dir: ${BIGFISH_AVATAR_ASSETS_DIR:}
