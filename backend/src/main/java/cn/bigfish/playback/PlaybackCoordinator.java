@@ -28,7 +28,7 @@ public final class PlaybackCoordinator {
     private String sessionId = "";
     private Peer player;
     private String playerId;
-    private String retiringPeer;
+    private Peer retiringPeer;
     private Instant fencedUntil = Instant.MIN;
     private long generation, epoch;
     private Instant leaseUntil = Instant.MIN, ackUntil = Instant.MIN;
@@ -142,14 +142,18 @@ public final class PlaybackCoordinator {
             }
         }
     }
+    /** Revoke immediately, but keep the exclusion fence until transport close is observed. */
+    public synchronized void disconnecting(Peer peer) {
+        if (player != null && player == peer) revoke("PLAYER_DISCONNECTED");
+    }
     public synchronized void disconnected(Peer peer) {
-        if (player != null && player.id().equals(peer.id())) revoke("PLAYER_DISCONNECTED");
+        disconnecting(peer);
         // Transport has observed the close. Until then the previous client may still be audible.
-        if (peer.id().equals(retiringPeer)) { retiringPeer = null; fencedUntil = Instant.MIN; }
+        if (peer == retiringPeer) { retiringPeer = null; fencedUntil = Instant.MIN; }
     }
     public synchronized boolean deliveryAllowed(Peer peer, String taskId) {
         expireLease();
-        return player != null && player.id().equals(peer.id()) && current != null
+        return player != null && player == peer && current != null
             && current.taskId().equals(taskId) && current.expiresAt().isAfter(clock.instant());
     }
     public synchronized void stop(String reason) {
@@ -164,7 +168,7 @@ public final class PlaybackCoordinator {
     public synchronized boolean hasStarted() { return current!=null && started; }
     private boolean owns(Peer peer, String session, String id, long lease) {
         expireLease();
-        return player != null && player.id().equals(peer.id()) && sessionId.equals(session)
+        return player != null && player == peer && sessionId.equals(session)
             && playerId.equals(id) && generation == lease;
     }
     private boolean isReady() { return player != null && ready; }
@@ -185,7 +189,7 @@ public final class PlaybackCoordinator {
             ? Stage.FAILED : Stage.CANCELLED,revocation);
         if (current != null && player != null) player.send("CANCEL_TASK", sessionId, Map.of("taskId", current.taskId(), "reason", reason));
         if (player != null) {
-            retiringPeer = player.id(); fencedUntil = leaseUntil;
+            retiringPeer = player; fencedUntil = leaseUntil;
             player.close();
         }
         player = null; playerId = null; ready = false; current = null; started = false;

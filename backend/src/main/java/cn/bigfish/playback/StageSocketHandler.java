@@ -18,14 +18,14 @@ public final class StageSocketHandler extends TextWebSocketHandler {
         this.playback = playback; this.mapper = mapper;
     }
     @Override public synchronized void afterConnectionEstablished(WebSocketSession socket) throws Exception {
-        if (peers.size() >= 8) { socket.close(CloseStatus.POLICY_VIOLATION); return; }
+        if (peers.size() >= 8 || peers.containsKey(socket.getId())) { socket.close(CloseStatus.POLICY_VIOLATION); return; }
         socket.setTextMessageSizeLimit(8192);
         var peer = new SocketPeer(socket);
         peers.put(socket.getId(), peer);
         Thread.ofVirtual().name("stage-writer-" + socket.getId()).start(peer::write);
     }
     @Override protected void handleTextMessage(WebSocketSession socket, TextMessage message) {
-        var peer = peers.get(socket.getId());
+        var peer = peerFor(socket);
         if (peer == null || peer.closing) return;
         try {
             if (!peer.allowMessage()) throw new IllegalArgumentException();
@@ -51,16 +51,20 @@ public final class StageSocketHandler extends TextWebSocketHandler {
             } else throw new IllegalArgumentException();
         } catch (Exception ignored) {
             // Do not log frames, payloads or deserializer exception messages.
-            playback.disconnected(peer); peer.close();
+            playback.disconnecting(peer); peer.close();
         }
     }
     @Override public void afterConnectionClosed(WebSocketSession socket, CloseStatus status) {
-        var peer = peers.remove(socket.getId());
-        if (peer != null) { playback.disconnected(peer); peer.close(); }
+        var peer = peerFor(socket);
+        if (peer != null && peers.remove(socket.getId(),peer)) { playback.disconnected(peer); peer.close(); }
     }
     @Override public void handleTransportError(WebSocketSession socket, Throwable error) {
-        var peer = peers.get(socket.getId());
-        if (peer != null) { playback.disconnected(peer); peer.close(); }
+        var peer = peerFor(socket);
+        if (peer != null) { playback.disconnecting(peer); peer.close(); }
+    }
+    private SocketPeer peerFor(WebSocketSession socket) {
+        var peer=peers.get(socket.getId());
+        return peer!=null && peer.socket==socket ? peer : null;
     }
     @Scheduled(fixedDelay = 1000)
     public void pruneIdleConnections() {
@@ -84,7 +88,8 @@ public final class StageSocketHandler extends TextWebSocketHandler {
         public boolean send(String type, String session, Object payload) {
             return !closing && outbound.offer(new Frame(type, session, payload));
         }
-        public void close() {
+        public synchronized void close() {
+            if (closing) return;
             closing = true;
             if (!outbound.offer(new Frame("CLOSE", "", Map.of()))) {
                 outbound.clear(); outbound.offer(new Frame("CLOSE", "", Map.of()));
@@ -108,9 +113,14 @@ public final class StageSocketHandler extends TextWebSocketHandler {
                 // Socket failure is handled by lease revocation; never include raw frames in logs.
             } finally {
                 closing = true;
-                playback.disconnected(this);
+                playback.disconnecting(this);
                 try { socket.close(); } catch (Exception ignored) {}
-                peers.remove(id(),this);
+                // close() may block or fail. Never claim a live transport has already closed.
+                // A failed close retains its bounded connection slot until the framework callback.
+                if (!socket.isOpen()) {
+                    playback.disconnected(this);
+                    peers.remove(id(),this);
+                }
             }
         }
     }
