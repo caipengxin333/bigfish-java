@@ -12,9 +12,10 @@
 | 评论与礼物处理 | 评论调用模型，礼物默认使用感谢模板；支持去重、连击合并、优先级、队列容量和过期控制 |
 | DeepSeek | 已接入会话，支持模型目录检查和真实回复；也可选择 MOCK 回复 |
 | 阿里云 NLS | 已验证知柜（`zhigui`）静态 Token 短句合成与浏览器播放；支持默认 STATIC 和显式 RAM 按需获取/续期，RAM 云端验收待完成 |
-| 浏览器舞台 | 一键开始/停止互动、恢复同会话播放、音频、字幕、音量驱动嘴型、独占播放端和播放回执；当前为原创 SVG 鱼形角色 |
+| 浏览器舞台 | 一键开始/停止互动、恢复同会话播放、音频、字幕、音量驱动嘴型、独占播放端和播放回执；默认原创 SVG，可切换到本机 Live2D |
 | 抖音采集 | 已开放显式 `DOUYIN` 主会话；指定房间的游客解析、握手、真实评论/入场/点赞接收已验证；真实礼物与主会话完整链路待验收 |
-| Live2D / 长时间运行 | Live2D 尚未接入；长期连续运行和 OBS 后台播放尚未完成验收 |
+| Live2D | 已接入固定 BigFish 模型的本机加载、嘴型、眨眼、待机、手动表情和布局设置；外部模型/Core 需单独配置，不随项目分发 |
+| 长时间运行 | 长期连续运行、跨浏览器兼容性和 OBS 后台播放尚未完成验收 |
 
 普通标签页切换不会主动断开舞台；浏览器冻结、休眠、音频中断或租约到期时需恢复播放，长期后台和 OBS 行为尚未验收。保存房间号不会自动连接抖音；必须明确选择消息来源并点击舞台“开始互动”。此操作不会替用户在抖音开播。
 
@@ -101,6 +102,14 @@
 
 详细说明：[DeepSeek](docs/providers/deepseek.md) · [阿里云 NLS](docs/providers/aliyun-nls.md) · [抖音采集限制](docs/providers/douyin.md)。
 
+## 本机 Live2D 形象
+
+默认 SVG 无需模型资源。使用 Live2D 时，将模型和指定版本的 Cubism Core 放入**独立资源目录**，设置后端环境变量 `BIGFISH_AVATAR_ASSETS_DIR` 为该目录的绝对路径，重启后端；随后在舞台展开“舞台形象设置”，选择“Live2D · 本机 BigFish”。
+
+资源目录须与 `BIGFISH_DATA_DIR` 分离，不放入默认的 `runtime/` 数据目录及其子目录。前端通过同源 `/avatar-assets/` 读取，Java 不需要启动 Python 辅助服务。模型缺失或渲染失败会回退 SVG，已有声音链路保持可用。
+
+当前仅支持固定 BigFish 入口，没有自动扫描、目录选择或上传功能。大小、位置、背景仅保存在当前浏览器；模型/Core 不进入 Git、前端构建产物或 JAR。目录结构、SDK 固定版本、启动方式及使用范围见 [Live2D 配置](docs/live2d.md)。
+
 ## 打包与运行
 
 在仓库根目录执行：
@@ -129,6 +138,7 @@ java -jar bigfish-server-0.1.0-SNAPSHOT.jar
 | 生成音频 | 默认在 `runtime/audio/` |
 | API Key / NLS Token | 由后端运行环境提供，修改后重启 |
 | 数据目录与端口覆盖 | `BIGFISH_DATA_DIR`、`BIGFISH_PORT`；开发前端可用 `BIGFISH_UI_PORT`、`BIGFISH_API_TARGET` |
+| Live2D 资源 | `BIGFISH_AVATAR_ASSETS_DIR` 指定独立绝对目录；更换根目录后重启；形象偏好保存在浏览器 |
 
 启动脚本默认使用仓库内 `runtime/` 的绝对路径；直接执行 `java -jar` 时，默认数据目录相对于当前工作目录。需要固定存储位置时设置 `BIGFISH_DATA_DIR`。SQLite 适合当前单实例运行方式。
 

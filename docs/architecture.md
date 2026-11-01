@@ -9,6 +9,8 @@ CollectorPort → EventIngress → 事件校验/去重 → 分类有界队列 �
 管理端 /admin：业务配置、本浏览器启动选项、打开舞台、停止互动、连接状态与诊断；不创建 AudioContext。
 播放端 /stage：一键开始/停止互动、接入或恢复同一会话、音频、字幕和形象。页面分别控制同一个后端会话，只有有效租约的播放端能发声。
 
+形象默认 SVG，可在本浏览器切换为固定 BigFish Live2D。BrowserAudio 实际音量通过已有组件参数驱动嘴型；渲染适配层负责眨眼、待机、物理与手动表情，不新增播放端、后端轮询或情绪协议。独立外部资源根目录由 `BIGFISH_AVATAR_ASSETS_DIR` 在启动时指定，只读同源 `/avatar-assets/` 提供受限文件；资源不属于运行数据、SQLite 或 JAR。当前没有目录扫描和模型上传，详见 [Live2D](live2d.md)。
+
 ## 模块
 
 - contract：公共 Java DTO/接口，集成窗口独占。

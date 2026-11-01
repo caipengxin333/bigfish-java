@@ -1,6 +1,6 @@
 # 文件边界与协作流程
 
-> 当前第六轮：后端负责 Java 会话故障与诊断一致性，前端负责 Vue 故障摘要、恢复提示与浏览器音频，采集窗口负责采集解析与签名。最新集成结果见 [phase6-integration.md](handoffs/phase6-integration.md)，各窗口继续前必须同步最新 main。第二至五轮计划仅作历史记录，不再将前端窗口分配给 Java 语音。
+> 当前第九轮：后端负责独立外部 Live2D 资源服务，前端负责 Live2D 渲染与舞台设置，主窗口负责资源路径、来源声明、打包和联调。采集窗口本轮无新增任务；本轮没有自动扫描、上传或 AI 情绪协议。集成记录见 [phase9-integration.md](handoffs/phase9-integration.md)。各窗口继续前必须同步最新 main，保留此前会话故障、播放生命周期和采集解码修复。
 
 > 下列目录是角色的最大边界，实际修改仍以当前明确任务为准；没有新任务的模块不顺手重写。公共字段、线上播放协议和依赖调整交集成窗口。
 
@@ -17,7 +17,7 @@
 
 后端：backend/src/main/java/cn/bigfish 下 configuration/event/scheduler/conversation/speech/playback/persistence/management；backend/src/main/resources（静态资源除外）；backend/src/test/java/cn/bigfish/core/；docs/handoffs/backend.md。基础集成测试如需改动提出说明，不能删除或削弱已有断言。
 
-前端：frontend/、本任务 docs/handoffs/phase*-frontend*.md。src/contracts.ts 仅允许按已确认公共契约同步 TypeScript 镜像，不能自创公共字段或语义；package.json/lockfile 的依赖调整须交集成窗口。本轮不得改 Java 语音。
+前端：frontend/、本任务 docs/handoffs/phase*-frontend*.md。src/contracts.ts 仅允许按已确认公共契约同步 TypeScript 镜像，不能自创公共字段或语义。第九轮用户明确允许前端调整必要的 SDK 构建、package.json/lockfile，须固定版本和说明许可；最终采用本地固定官方 Framework，没有新增 npm 包或改变版本。此授权不扩展到其他依赖或 Java 语音；后续依赖变更仍交主集成统一。
 
 采集：backend/src/main/java/cn/bigfish/collector/、backend/src/test/java/cn/bigfish/collector/、backend/src/test/resources/collector/、docs/handoffs/collector.md。新依赖通过提案交集成窗口统一加，不自行修改公共 POM。
 

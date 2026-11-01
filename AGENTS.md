@@ -7,7 +7,7 @@
 
 ## 工作边界
 
-当前职责以用户第六轮任务及 docs/task-boundaries.md 为准：后端窗口负责 Java 会话故障与诊断一致性，前端窗口负责 Vue 故障摘要、恢复提示及浏览器音频生命周期，采集窗口独占采集解析/签名。Java 语音适配本轮没有新任务，不能因旧职责顺手修改。公共契约、文档和最终联调由主集成窗口负责，结果见 docs/handoffs/phase6-integration.md。独立 GitHub 上传按 docs/prompts/github-publish.md 执行；实现窗口仍不推送。
+当前职责以用户第九轮任务及 docs/task-boundaries.md 为准：后端窗口负责外部 Live2D 资源服务，前端窗口负责 Live2D 渲染、舞台设置和既有播放生命周期，采集窗口本轮无新任务且继续独占采集解析/签名。Java 语音适配本轮没有新任务。公共契约、文档和最终联调由主集成窗口负责，结果见 docs/handoffs/phase9-integration.md。独立 GitHub 上传按 docs/prompts/github-publish.md 执行；实现窗口仍不推送。
 1. 当前项目是独立的新实现，不是 Luna 的原地重写。首先阅读 README.md、docs/architecture.md、docs/task-boundaries.md、自己任务对应的 docs/prompts 文件。
 2. 只在指定 worktree 和分支工作；每次开工检查 `pwd`、`git branch --show-current`、`git status --short`。
    - 每轮继续开发也要同步基线，不只首次开工。功能分支先执行 `git merge-base --is-ancestor main HEAD`；非 0 表示尚未包含当前 main。保留并核对本工作树已有改动，干净后执行 `git merge --no-edit main`，再阅读最新对应 handoff。不得用复制目录、reset 或整文件选一方替代合并。
@@ -30,3 +30,4 @@
 - 当前已集成显式 MOCK/DOUYIN 会话、DeepSeek/NLS、STATIC/RAM Token、任务诊断及舞台一键互动。DOUYIN 能力开放不等于所有真实场景验收；指定房间独立采集测试已收到 24 条评论、46 条入场和 22 条点赞，MALFORMED 为 0；真实礼物及主会话真实弹幕到语音播放的完整链路仍待验收。普通切后台不主动断开，冻结/失效后手动恢复同会话。会话集成见 docs/handoffs/phase6-integration.md，最新采集集成见 docs/handoffs/phase8-collector-integration.md；RAM 云端签发与长期后台稳定性未验收。须保留 c8be17c 的 PCM 转 WAV、停止/租约隔离、主窗口音频中断释放播放端修复，以及 4bbab80 的序列化/压缩分离、头部 ACK 和有界诊断回归。
 - 前端最新故障摘要修补见 docs/handoffs/failure-summary-ui.md；后续先同步 main，保留采集根因优先、同会话诊断证据及默认折叠的技术详情，不能把后续播放断开显示为首要故障。
 - 第六轮已整合后端故障一致性及前端恢复提示，最新验收见 docs/handoffs/phase6-integration.md。后续同步 main 后须保留终止根因优先、主动取消不计失败、同环节恢复证据，以及停止超时后新 STOPPED 快照解除旧提示的回归；公共 phase/recoveredAt 字段仍仅是提案。
+- 第九轮固定 BigFish Live2D 已接入；模型/Core 放独立外部目录，与 BIGFISH_DATA_DIR 分离，不进 Git、dist 或 JAR。前端资源代理与业务代理统一，默认 18080；工作树使用 BIGFISH_API_TARGET。原始 Framework/Core 声明不适用项目 Apache-2.0；保留来源和产物声明。SDK/模型当前固定，自动扫描/上传尚未实现。

@@ -13,6 +13,12 @@ runtime/
 *.log
 *.tsbuildinfo
 
+# External avatar assets and proprietary runtime are installed locally, not published.
+avatar-assets/
+*.moc3
+*.model3.json
+live2dcubismcore*.js
+
 # Local data, credentials, and network captures (including files outside runtime/).
 *.db
 *.db-wal

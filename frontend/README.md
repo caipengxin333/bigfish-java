@@ -47,7 +47,11 @@ STARTED 跟随音频时钟推进，不只依赖动画帧；COMPLETED 来自 sour
 
 `src/stage/avatar.ts` 导出 `stageAvatarKey`，可在应用创建时 `app.provide(stageAvatarKey, YourAvatar)` 替换默认组件。渲染组件接受 `mouthLevel`（0..1）、`speaking`、`connected`；由舞台统一控制音频，组件不得自行播音。
 
-默认 `PlaceholderAvatar.vue` 是为本项目手工编写的原创 SVG 鱼形角色；mock/stage.ts 的测试音为内存生成 PCM 正弦音。没有复制旧项目 Live2D 模型、纹理、声音、配置或第三方采集脚本。真实 Live2D SDK/模型需由集成窗口确认来源及许可证后再接入。
+默认宿主 `StageAvatar.vue` 提供原创 SVG / 本机 Live2D 切换，SVG 仍使用 `PlaceholderAvatar.vue`；mock/stage.ts 的测试音为内存生成 PCM 正弦音。Live2D 只接收已有播放音量和状态，不自行播放或请求语音。
+
+官方 Framework 5-r.4 由 `npm run sdk:build` 独立编译，应用保持严格类型检查；不新增 npm 依赖。运行时 Core 和 BigFish 模型从同源 `/avatar-assets/` 加载，根目录由后端 `BIGFISH_AVATAR_ASSETS_DIR` 指定，须在其数据目录之外。Vite 各代理统一使用 `BIGFISH_API_TARGET`，缺省主后端 18080；工作树隔离仍由原脚本设置。
+
+`bigfish.browser.avatar.v1` 仅保存白名单中的形象模式、大小、位置和背景；没有任意模型 URL、目录扫描或上传。正式 Java 资源与人工音频联调记录见 `../docs/handoffs/phase9-integration.md`。本机模型/Core 不在源码和产物中；Framework 与编译期 Core 声明保留各自许可，见 `../THIRD_PARTY_NOTICES.md`。完整使用说明见 `../docs/live2d.md`。
 
 ## 集成验收入口
 
