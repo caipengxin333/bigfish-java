@@ -1,6 +1,6 @@
-# 抖音采集适配器：第三轮原生签名与验收说明
+# 抖音采集适配器：原生签名与自动游客会话
 
-核查日期：2026-11-01。已内置 `NativeDouyinSigner`，以有 MIT 许可的原生算法为来源移植到 Java 21；公开签名向量和本地 HTTP/WebSocket → 事件接收链路已验证。**尚未验证抖音当前线上接受该签名及连接参数，也没有真实评论/礼物结果。** 用户暂无当前直播间，后续一起实测。`SessionService` 接线和状态文案由集成窗口负责，现有 `bootstrap.douyinCollector=false` 不变。
+核查日期：2026-11-01。已内置 `NativeDouyinSigner` 与 `WebDouyinConnectionProvider.guest()`。默认只需规范直播链接/网页房间号，自动获取游客 Cookie、页面访客 ID 和内部房间号，再用现有原生 signer 生成短期连接参数。公开签名向量和本地 HTTP/WebSocket → 事件接收链路已验证。**尚未验证抖音当前线上接受该签名及连接参数，也没有真实评论/礼物结果。** 用户暂无当前直播间，后续一起实测。`SessionService` 接线和状态文案由集成窗口负责，现有 `bootstrap.douyinCollector=false` 不变。
 
 ## 接入方式与适用范围
 
@@ -9,16 +9,16 @@
 | 官方直播互动工具 | 主播在 App/直播伴侣使用获准的互动工具；须申请能力、提案审核。文档列出评论、礼物能力，同时注明当前暂停新插件准入，且工具能力不能经开发者服务器联网 | 不能直接当作任意直播间的 Java 服务端采集 API；是否适合 AI 回复场景须先向平台确认 |
 | 官方直播小玩法 | 已通过资质/提案的玩法及对应开播场景；FAQ 限制可配置弹幕指令，明确不提供主动拉取全量或指定用户评论 | 不等同于读取任意普通直播间全部评论；官方方案需另做获准的适配器 |
 | 官方直播 SDK | 第三方 Android/iOS App 内看播、账号授权等；有应用资质/接入要求 | 不是 Java 后端通用弹幕 SDK |
-| 网页端非官方协议（本适配器） | 用户提供当前直播网页、合法取得的网页会话凭据、经审查的签名实现；受地区、登录态、页面和私有协议变化影响 | 只能在条件具备后逐层实测，不能称为无需鉴权的稳定公开 API |
+| 网页端非官方协议（本适配器） | 用户提供当前直播网页；程序建立游客会话，遇登录/验证要求时停止。受地区、访客访问能力、页面和私有协议变化影响 | 只能在条件具备后逐层实测，不能称为无需鉴权的稳定公开 API |
 
 依据：[官方互动工具接入指南](https://partner.open-douyin.com/docs/resource/zh-CN/live-interactive-tools/introduction/interactive-tools-guide)、[官方直播小玩法 FAQ](https://developer.open-douyin.com/docs/resource/zh-CN/interaction/introduction/zn/FAQ)、[官方直播 SDK 方案](https://open.douyin.com/platform/resource/docs/ability/douyin-live-sdk/solution/)。以上不同产品的授权范围不能互换，当前用户账户并未验证具备这些官方权限。
 
 ## 已实现的数据路径
 
-`DouyinCollector → WebDouyinConnectionProvider → 当前凭据 → DouyinRoomResolver → NativeDouyinSigner → DouyinConnection → JDK WebSocket → Protobuf/gzip → 有界事件队列 → CollectorPort 回调`。
+`DouyinCollector → WebDouyinConnectionProvider.guest() → 首页游客 Cookie → 房间页面/访客 ID → NativeDouyinSigner → DouyinConnection → JDK WebSocket → Protobuf/gzip → 有界事件队列 → CollectorPort 回调`。
 
-- Provider 每次 `resolve` 都重新取凭据、抓取房间页面、生成新的签名请求 nonce；不缓存签名 URL、Cookie 或房间状态。不存在自动 MOCK 回退。
-- 解析器只请求规范化的 `https://live.douyin.com/<网页房间号>`，所有 HTTP 重定向一律拒绝，无全局 Cookie jar、磁盘缓存、浏览器脚本执行或任意 URL 抓取入口。
+- 游客 Provider 每次 `resolve`（包括重连）最多两次 HTTP GET：首页一次、房间页面一次。重新获取游客 Cookie、页面访客 ID、房间状态，再生成签名 nonce 和当前时间；不缓存签名 URL/Cookie/房间状态，不自动回退到 MOCK 或登录凭据。
+- 解析器只请求 `https://live.douyin.com/` 及规范化的 `https://live.douyin.com/<网页房间号>`，所有 HTTP 重定向一律拒绝，无全局 Cookie jar、磁盘缓存、浏览器脚本执行或任意 URL 抓取入口。
 - HTTP 响应上限 2 MiB，包含整个响应体的总时限 10 秒；`stop` 中断等待后取消 HTTP future 并关闭其 HttpClient。
 - 页面仅支持脚本内的 JSON、`RENDER_DATA` 百分号编码 JSON、`self.__pace_f.push` JSON 字符串中的 `roomStore.roomInfo`。读取房间 `id_str/roomId`、主播 `id_str/nickname`、`room.status`，校验重复结果和可用的 `anchor.web_rid`。不使用“页面任意 roomId 正则”获取推荐房间。
 - 当前解析器约定 `room.status=2/4` 为直播/结束；不混用 `/web/enter` 的 `room_status`。这些页面形态与状态映射仅经人工夹具验证，**未用真实页面证实覆盖率**。关播页面缺内部 ID、状态未知、多个房间数据冲突均失败关闭，不能猜测。
@@ -34,23 +34,44 @@
 - 不接受 query、fragment、userinfo、编码路径、其他端口、HTTP、短链接 `v.douyin.com`、用户主页、分享文案或其他主机。请用户在自己的浏览器展开短链，提供上述规范地址；后端不代为追踪分享跳转。
 - 网页号不等于内部 roomId；不能把历史内部 roomId 当作当前网页号。
 
-## 准备项和内存凭据
+## 默认用法：只填直播链接或房间号
 
-由用户在本机进程环境中配置；不要把值发到聊天、命令参数、shell 历史、`runtime/worktree.env`、源码、SQLite 或前端。可通过本机已有的安全启动环境/凭据管理方式注入，本文不提供包含凭据值的命令。只检查下列变量的存在性，不列出全部环境。
+集成调用 `WebDouyinConnectionProvider.guest()`；用户无需提供 Cookie、User-Agent、`user_unique_id` 或凭据截止时间。自动流程为：
 
-| 环境变量 | 作用 |
+1. 不带 Cookie 请求固定抖音直播首页，读取响应 `Set-Cookie` 中的 `ttwid`。
+2. 携带该 `ttwid` 和同一程序 UA 请求当前房间页面。房间响应更新 `ttwid` 时采用新值，其余 Cookie 不转发给 WSS。
+3. 解析已支持的 JSON/RENDER_DATA/pace 页面数据。内部房间号来自 `roomStore.roomInfo`；访客标识只取明确的 `user_unique_id` 字段，不拿主播 UID、房间号或随机数替代。缺失为 `GUEST_ID_MISSING`，冲突/非法字段为 `PAGE_STRUCTURE_CHANGED`。已关播/内部 roomId 改变时不再要求访客 ID，也不签名或开第二条连接。
+4. 由现有原生 signer 构造当前时间、房间、访客和 nonce 对应的短期目标。Cookie/访客值只存在于本次连接内存；重连重新走上述流程。
+
+程序内置 UA 是 `Mozilla/5.0 (compatible; BigFishCollector/0.1; Java/21)`，明确标识该 Java 客户端，整个尝试保持一致；不是从用户浏览器读取，也不轮换 UA/代理来试探访问限制。该 UA、游客页面字段和初始 WSS 参数是否被当前线上接受仍需实测。
+
+Cookie 只接受固定平台首页/房间响应中的 `ttwid`，限制值长度、总头部大小、Domain/Path，拒绝冲突、非法或已删除/过期值；不读取登录 Cookie、不生成 msToken/nonce 挑战值、不执行页面脚本。响应中其他 Cookie 不加入请求。`Max-Age`/`Expires` 与本地最长 5 分钟预算共同限制连接材料；会话 Cookie 未给期限时使用本地预算。这不是平台保证的有效期，也不代表长连接必须每 5 分钟重建。无共享 Cookie jar、磁盘缓存或凭据持久化。
+
+首页/房间若要求登录、验证、地区权限或限流，立即给出固定诊断，停止自动重试。首页没下发 `ttwid`、页面没给访客字段时也明确失败；不猜测或复用旧项目硬编码参数。我们只验证了本地人工页面，不保证所有房间允许游客访问。
+
+## 独立 probe 开关与可选外部凭据
+
+用户输入项只有当前房间。以下开关供开发者显式运行只读验收，避免默认测试联网；不是要求用户每次开播准备凭据。
+
+| 环境变量 | 默认及作用 |
 | --- | --- |
-| `BIGFISH_DOUYIN_LIVE_PROBE` | 必须显式为 `true` 才允许运行独立验收 |
-| `BIGFISH_DOUYIN_ROOM` | 用户当前正在直播的规范链接/网页房间号 |
-| `BIGFISH_DOUYIN_PROBE_ACTION` | 显式选择 `resolve`（只读取页面）或 `receive`（页面及 WSS） |
-| `BIGFISH_DOUYIN_COOKIE` | 用户合法网页会话的 Cookie，仅传给固定抖音主机；不自动登录、绕过挑战或从旧项目读取 |
-| `BIGFISH_DOUYIN_USER_AGENT` | 与该网页会话一致的 User-Agent |
-| `BIGFISH_DOUYIN_USER_UNIQUE_ID` | 与该网页会话匹配的浏览器访客 `user_unique_id`；不是主播 ID，不从旧示例复制固定值 |
-| `BIGFISH_DOUYIN_CREDENTIALS_EXPIRES_AT` | 本次凭据允许使用到的 ISO-8601 UTC 时间；这是本机使用期限，不保证服务端 Cookie 尚有效 |
-| `BIGFISH_DOUYIN_PROBE_SECONDS` | 可选，默认 60 秒，范围 1～120 秒 |
-| `BIGFISH_DOUYIN_SIGNER_REVIEWED` | `receive` 必须为 `true`，表示使用者已审查实际签名实现及来源；不能据此跳过许可证/权限核查 |
+| `BIGFISH_DOUYIN_LIVE_PROBE` | 默认关闭；必须显式 `true` |
+| `BIGFISH_DOUYIN_ROOM` | 当前规范链接/网页房间号 |
+| `BIGFISH_DOUYIN_PROBE_ACTION` | 显式 `resolve` 或 `receive` |
+| `BIGFISH_DOUYIN_PROBE_SECONDS` | 默认 60 秒，允许 1～120；真实首次验收使用 60 秒 |
+| `BIGFISH_DOUYIN_SIGNER_REVIEWED` | `receive` 须为 `true`，表示已核对 signer 来源；保留上一轮执行保护 |
+| `BIGFISH_DOUYIN_CREDENTIAL_MODE` | 默认 `guest`；只有显式 `external` 才读取下面四项 |
 
-为避免把匿名连接当作完整能力，本实现要求 Cookie、User-Agent、访客 ID 三者齐备，`resolve` 也沿用这个准备条件。它不声称任何 Cookie 都能收到礼物，不声称平台对所有房型有相同要求。环境变量只在进程启动时继承；需要轮换时重启进程，集成可以用 `CredentialSource` 每次返回新的内存凭据。
+正常使用无须配置以下四项。它们只保留给经用户授权的外部会话诊断：
+
+| 仅 external 使用 | 内容 |
+| --- | --- |
+| `BIGFISH_DOUYIN_COOKIE` | 用户合法网页会话的 Cookie |
+| `BIGFISH_DOUYIN_USER_AGENT` | 同一会话 UA |
+| `BIGFISH_DOUYIN_USER_UNIQUE_ID` | 与该会话匹配的访客 ID |
+| `BIGFISH_DOUYIN_CREDENTIALS_EXPIRES_AT` | 本地允许使用到的 ISO-8601 UTC 截止时间 |
+
+`guest` 完全不读取这些变量，即使机器上已有值也不会自动用它们尝试登录。`external` 缺项或过期直接失败，不自动降级到游客模式。外部凭据仅通过本机后端安全环境/内存注入，不发到聊天，不写命令参数、shell 历史、`runtime/worktree.env`、源码、SQLite 或前端。环境值轮换需重启进程；显式注入的 `CredentialSource` 可逐次提供新值。
 
 ## 原生签名来源、实现与在线边界
 
@@ -76,9 +97,9 @@
 
 该入口不启动 Spring/管理页，不连接模型/TTS。默认无显式开关时输出 `mode=DOUYIN state=FAILED code=PROBE_DISABLED` 并以 2 退出；Maven 会把进程退出 2 显示成 BUILD FAILURE，这是预期保护。缺房间时 `ROOM_REQUIRED`，不去寻找随机直播间。
 
-完成本机准备后先选择 `resolve`，只抓取一次页面，输出状态与 `roomResolved`，不打印房间/主播信息。`receive` 使用内置且唯一的原生 ServiceLoader 实现，仍需显式 `BIGFISH_DOUYIN_SIGNER_REVIEWED=true`。未启用开关、缺房间/凭据、SPI 配置异常均在联网前终止。没有额外 JAR、脚本或浏览器安装步骤。
+先选择 `resolve`：默认游客模式最多抓取首页和房间页面各一次，输出状态与 `roomResolved`，不打印房间/主播/访客信息。`receive` 使用内置且唯一的原生 ServiceLoader 实现，仍需显式 `BIGFISH_DOUYIN_SIGNER_REVIEWED=true`。未启用开关、缺房间、非法模式、external 模式缺凭据或 SPI 配置异常均在联网前终止。没有额外 JAR、脚本或浏览器安装步骤。
 
-每次 `receive` 最多 3 次实际 Provider 解析/连接尝试，默认 60 秒后 stop，最多等待 2 秒观察资源释放。只发送协议所需的 ACK/Ping/Pong/心跳，无发评论、点赞、关注或送礼接口。输出均为固定状态/计数：实际 HTTP 请求数、签名次数、WSS 握手尝试数、连接数、总耗时、评论/礼物/关注/进场/点赞数、礼物增量总数、ACK/心跳/重复/异常/重连数和最后错误码。HTTP 计数是发起请求数，不是服务端确认处理数；resolve 与 receive 的每次运行单独汇总。业务内容、用户标识、Cookie、签名 URL 和原始帧均不输出。
+每次 `receive` 最多 3 次实际 Provider 解析/连接尝试：游客模式最多 6 次 HTTP、3 次签名/握手（遇永久错误立即停止）。默认 60 秒后 stop，最多等待 2 秒观察资源释放。只发送协议所需的 ACK/Ping/Pong/心跳，无发评论、点赞、关注或送礼接口。输出均为固定状态/计数：实际 HTTP 请求数、签名次数、WSS 握手尝试数、连接数、总耗时、评论/礼物/关注/进场/点赞数、礼物增量总数、ACK/心跳/重复/异常/重连数和最后错误码。HTTP 计数是发起请求数，不是服务端确认处理数；resolve 与 receive 的每次运行单独汇总。业务内容、用户标识、Cookie、签名 URL 和原始帧均不输出。
 
 终止报告保留 stop 前 `terminal` 和 stop 后 `STOPPED`。资源报告包括本采集器 source/dispatch 线程、业务队列、附着传输句柄、HTTP 在途请求和签名 worker；不把这些数当作 JVM 全部线程数。JDK 网络传输 close 会取消握手、abort socket、清空入站队列并 shutdownNow 客户端。已有业务回调必须响应中断，无法强制终止不合作的调用者代码。
 
@@ -89,7 +110,8 @@
 | 代码 | 处理 |
 | --- | --- |
 | `UNSUPPORTED_ROOM_URL` | 使用受支持规范链接；无请求 |
-| `CREDENTIALS_MISSING / INVALID / EXPIRED`（实际代码带 `CREDENTIALS_` 前缀） | 补齐或更新本机内存凭据；FAILED，不切 MOCK |
+| `CREDENTIALS_MISSING / INVALID / EXPIRED`（实际代码带 `CREDENTIALS_` 前缀） | external 模式补齐或更新内存凭据；guest 的 EXPIRED 表示响应 Cookie 已删除/期限不合格；FAILED，不切 MOCK |
+| `GUEST_COOKIE_MISSING / GUEST_COOKIE_INVALID / GUEST_ID_MISSING` | 首页未下发所需游客 Cookie、Cookie 不合格或房间页无明确访客字段；停止，等待真实条件/最小脱敏结构核查，不用固定 ID 填补 |
 | `AUTH_REQUIRED` | HTTP 401/403 或已知登录页；用户在自己的浏览器检查权限/登录，不自动绕过 |
 | `CHALLENGE_REQUIRED` | 识别到明确验证页（包括 HTTP 403 的已知验证标题）；停止，不自动解验证 |
 | `REGION_RESTRICTED` | 451 或明确地区限制页；停止，不改变地区绕过 |
@@ -122,16 +144,15 @@ Java 调 JS 在技术上可行，但本轮已有可移植原生核心，不引�
 ## 集成最小调用
 
 ```java
-WebDouyinConnectionProvider.CredentialSource credentials = () ->
-    new DouyinCredentials(cookieFromBackendMemory, matchingUserAgent,
-        matchingBrowserVisitorId, allowedUntil);
-DouyinSigner signer = new NativeDouyinSigner(); // 或 DouyinSigners.load()，内置唯一 SPI 实现
-var provider = new WebDouyinConnectionProvider(credentials, signer);
+var provider = WebDouyinConnectionProvider.guest(); // 内置现有原生 signer，自动游客初始化
+// 若要显式使用已加载的唯一 SPI：WebDouyinConnectionProvider.guest(DouyinSigners.load())
 var collector = new DouyinCollector(provider); // 实现现有 CollectorPort
 collector.start(canonicalWebRoomUrl, sessionId, boundedEngineIngress);
 // 会话取消/关闭：collector.stop() 或 collector.close()；二者幂等。
 ```
 
-`start` 异步失败通过 `state()==FAILED` 和 `diagnostics().lastError()` 读取，不能把 start 返回或 Bean 存在当作就绪。`DouyinRoomResolver.resolve(String, DouyinCredentials)` 可单独解析，抛固定 `DouyinFailure` 或中断。后续主会话应监听 ENDED/FAILED、停止旧 session 的队列/播放，保留网页号与内部 roomId 的区别，等待 `resources().released()` 及 Provider 资源清零后再启动新会话。不得将这些内存凭据/内部结果直接做成前端 DTO。
+`start` 异步失败通过 `state()==FAILED` 和 `diagnostics().lastError()` 读取，不能把 start 返回或 Bean 存在当作就绪。`DouyinRoomResolver.resolve(String, DouyinCredentials)` 保留外部会话单独解析路径，抛固定 `DouyinFailure` 或中断；默认游客路径不依赖它的手工凭据入口。后续主会话应监听 ENDED/FAILED、停止旧 session 的队列/播放，保留网页号与内部 roomId 的区别，等待 `resources().released()` 及 Provider 资源清零后再启动新会话。不得将这些内存凭据/内部结果直接做成前端 DTO。
 
-本轮本地验证包含：实际 Java HTTP 获取合成页面 → 原生签名 → 实际 JDK 回环 WebSocket → gzip/Protobuf → 本地事件接收器。产生 1 条 COMMENT、3 条 GIFT（增量 1/2/1）、1 条 ENTRANCE、1 条 FOLLOW；重复终包不重发，异常包后继续收取，ACK/心跳正常，关播 ENDED 后释放。此测试通过包内 seam 把传输目标替换为本机回环，不是抖音服务器对签名的验证，不能充当真实接收记录。
+本轮本地验证包含：仅输入房间号 → 实际 Java HTTP 获取合成首页 Cookie 和房间页面（2 次请求）→ 自动访客字段 → 原生签名 → 实际 JDK 回环 WebSocket → gzip/Protobuf → 本地事件接收器。产生 1 条 COMMENT、3 条 GIFT（增量 1/2/1）、1 条 ENTRANCE、1 条 FOLLOW；重复终包不重发，异常包后继续收取，ACK/心跳正常，关播 ENDED 后释放。此测试通过包内 seam 把传输目标替换为本机回环，不是抖音服务器对签名的验证，不能充当真实接收记录。
+
+自动游客初始化代码为独立 Java 实现，参考已有 MIT 来源中公开的 `ttwid`/`user_unique_id` 协议字段事实；没有复制旧 AI-Vtuber 的 AGPL Python/JS 代码、固定访客值、历史 URL 模板或协议脚本。原生 signer 与 MIT 版权说明保持原样，无新增依赖或后台进程。主会话/管理页仍须集成窗口改接上面的工厂；本窗口未开启 `douyinCollector` 就绪状态。

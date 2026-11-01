@@ -1,5 +1,7 @@
 # 第三轮抖音采集交接
 
+**最新追加：已提供只填规范直播链接/房间号的自动游客工厂，见文末“自动游客会话追加交付”。前一轮要求手填四项凭据的默认准备方式已被替代，仅保留为 external 诊断选项。真实抖音接收仍未验证。**
+
 日期：2026-11-01；工作树 `bigfish-worktrees/collector`；分支 `feature/douyin-collector`。
 开工工作区干净，已按授权从 `105304d` 快进合入 main `e39ca19893cde16a27937eac30c415db11a726cb`。基线回归 140 项：139 通过、1 项真实 NLS 测试按默认条件跳过、0 失败/错误。
 
@@ -98,3 +100,65 @@ collector.start(currentCanonicalWebRoom, sessionId, boundedEventIngress);
 3. 先显式 `resolve` 一次，再 `receive` 60 秒（不超过 120 秒，最多 3 次尝试）；所需环境和命令见 [provider 文档](../providers/douyin.md)。至少实际 COMMENT 才能通过评论验收；FOLLOW/ENTRANCE/GIFT 分别计数、分别报告。无自然礼物不延长等待、不主动送礼。
 4. 若出现登录/验证码/地区/限流，返回固定码交用户处理；握手被拒绝不能仅凭状态推断是 Cookie 或签名过期。取得授权的最小去标识样本后再适配结构，不能提交完整真实帧。
 5. 当前只能交付“实现和本地验证完成、线上待联调”，不能将来源声明、算法向量、HTTP 200、WSS 握手或本地替身当成真实端到端验收。
+
+
+## 自动游客会话追加交付（2026-11-01）
+
+用户授权：默认只填写直播链接/网页房间号，游客 Cookie 和连接参数自动获取，沿用原生 signer，不复制旧项目 AGPL 代码；真实直播后续一起测试。
+
+本轮开工检查目录/分支正确且工作区干净，起点 `2e7183d0e779db226c1cecf69754b9936aa649de`；`git merge-base --is-ancestor main HEAD` 返回 0，`git merge --no-edit main` 返回 Already up to date，main 为 `55a6fa04758b86be5550af5fd1c3d07cbc560b3c`。
+
+实现提交：**`7cf5ac7bd1f9440627fe96e8967941ce46c63236`**（`feat(collector): bootstrap guest sessions from room links`）。此前原生 signer 实现 `f02caaaa15758f48b89b343e0ad009a5aaa6b74b` 保留；本次没有修改签名算法或 SPI 描述文件，没有新增 Maven/Node/浏览器依赖。
+
+### 默认输入和自动流程
+
+- 用户仅提供支持的规范网页链接或 1～30 位数字网页房间号，详见 [provider 使用说明](../providers/douyin.md)。仍不自动跟随短链接、跨域或任意重定向。
+- `WebDouyinConnectionProvider.guest()` 使用已有 `NativeDouyinSigner`，无凭据参数；显式 signer 版本为 `guest(DouyinSigner)`。
+- 每次尝试先 GET 固定直播首页，不带 Cookie；从 `Set-Cookie` 提取平台下发的 `ttwid`。然后 GET 该房间页面，读取内部房间号和明确的 `user_unique_id` 字段；响应中的 ttwid 轮换会更新到 WSS 请求。
+- Cookie 名仅允许 ttwid，不转发其他登录 Cookie。校验 Domain/Path、值及头部大小、重复冲突、Max-Age/Expires。显式负数/零 Max-Age 作为过期；无服务端期限时使用本地 5 分钟连接材料预算。该预算不代表真实 Cookie 有效期或 WS 必须定时重建。
+- UA 内置为 `Mozilla/5.0 (compatible; BigFishCollector/0.1; Java/21)`，明确标识程序；无需用户复制浏览器 UA，不轮换画像、代理或 IP。
+- 访客 ID 支持原页面解析的 JSON、百分号 RENDER_DATA 和 pace JSON 字符串，拒绝缺失、冲突、非法值和重复 JSON 字段；不使用主播 ID、房间号、随机 ID 或旧项目固定 ID 填补。
+- 访客 Cookie 和 ID 属于单次尝试，不落盘、不跨会话缓存。重连重新请求首页/房间并签名；旧场次结束或内部 roomId 改变，在签名前结束，不要求不存在的新访客字段。
+- 新增固定码 `GUEST_COOKIE_MISSING / GUEST_COOKIE_INVALID / GUEST_ID_MISSING`。沿用登录、验证、地区、限流、过期及结构变化错误；失败不自动回退 external/MOCK，不执行挑战脚本。
+- `DouyinCollectorProbe` 默认 `BIGFISH_DOUYIN_CREDENTIAL_MODE=guest`，完全不读取原 COOKIE、USER_AGENT、USER_UNIQUE_ID、CREDENTIALS_EXPIRES_AT 变量。只有显式 `external` 才启用旧的四项输入；不能因为机器上已有凭据就自动尝试登录。
+
+### 来源与许可
+
+新会话/HTTP Cookie/页面访客解析为独立编写的 Java 代码，使用现有 JDK 与 Jackson。仅核对公开协议字段和请求阶段：[MIT 上游 room_info.go](https://github.com/jwwsjlm/douyinLive/blob/af34f7c2ea2c4df90c6f4659e967fb31815d9255/room_info.go)、[cookie_context.go](https://github.com/jwwsjlm/douyinLive/blob/af34f7c2ea2c4df90c6f4659e967fb31815d9255/cookie_context.go)。未复制其回退主播 ID、Cookie 存储、浏览器伪装或挑战逻辑。旧 AI-Vtuber 仅此前只读调查，本轮未复制/执行其 Python、AGPL `douyin_protocol.py` 或 `sign.js`。此前原生 signer 的 MIT 来源、版权声明和许可边界不变。
+
+### 本地验证和请求记录
+
+| 命令/场景 | 实际结果 |
+| --- | --- |
+| `./scripts/maven.sh -B -ntp test`，17:34:27 | 159 项，158 通过、1 跳过，18.145 秒 |
+| `./scripts/maven.sh -B -ntp test`，17:36:27，最终代码串行重编译 | **160 项，159 通过、1 跳过，0 失败/错误；collector 78/78 通过；18.022 秒** |
+| `env BIGFISH_DOUYIN_LIVE_PROBE=false ./scripts/dev-backend.sh -B -ntp -Dspring-boot.run.main-class=cn.bigfish.collector.DouyinCollectorProbe` | 输出 PROBE_DISABLED；Java 退出 2 / Maven 退出 1 是预期保护；4.660 秒，无平台请求 |
+| 仅房间号 → 本地 JDK HTTP → 原生签名 → 本地 JDK WS → 事件接收器 | 2 次回环 HTTP（首页+房间）、1 次签名、1 次握手；6 条合成事件、礼物增量 1/2/1、3 个重复抑制、1 个异常包；ACK/心跳、ENDED 与资源释放通过；17:36 回归用例 0.042 秒 |
+| 原有外部凭据本地链路 | 保留原断言，同样通过；本地 1 次 HTTP、1 次签名/握手；0.019 秒 |
+| 游客重连 | 两次尝试共 4 次合成 HTTP、2 次原生签名，Cookie/访客 ID/签名更新；不缓存旧访客状态 |
+| HTTP 与故障验证 | 首页/房间实际 pending HTTP 均能 stop 取消；拒绝重定向且目标请求数 0；拒绝过大 Set-Cookie；Cookie 过期/非法/冲突、访客缺失/冲突、验证/登录/限流及换播测试通过 |
+| `git diff --check` | 通过 |
+
+开发中修正了一处重复 toString 声明。一次测试和 probe 构建重叠导致仅发现 96 项，用例发现不完整，**不将该次 BUILD SUCCESS 作为验收**；已结束两次构建，修正后串行重新编译并完整发现/通过上表 160 项。唯一跳过项仍是默认关闭的 AlibabaNlsLiveTest。
+
+**真实抖音 HTTP 0 次、WSS 0 次、接收观察 0 秒；真实评论/礼物/关注/进场均未验证。** 没有真实 Cookie、UID、昵称或帧进入源码/测试/报告，没有请求真实 DeepSeek/TTS，没有修改或运行旧项目。默认探针检查与协议来源研究不算真实接收证据。
+
+### 主窗口集成提案（本窗口未改共享接线）
+
+```java
+var provider = WebDouyinConnectionProvider.guest();
+var collector = new DouyinCollector(provider);
+collector.start(canonicalLiveLinkOrWebRoomNumber, sessionId, boundedEventIngress);
+// 停止：collector.stop(); 等待 collector.resources().released()
+// 及 provider.inFlightRequests()==0、provider.signingWorkers()==0。
+```
+
+主会话的房间输入直接传给此工厂构造的 Collector 即可。用户界面无需增加四项凭据字段；无需任何 POM 提案。外部凭据构造器保留原语义，供用户明确授权的诊断使用。Vue、SessionService、ProviderServices、公共配置/DTO、bootstrap 状态均未改；此工厂接线仍交主窗口，未将 douyinCollector 改为 true。
+
+独立真实 probe 后续由开发者显式启用 LIVE_PROBE、PROBE_ACTION、SIGNER_REVIEWED，用户只提供 ROOM；默认游客模式。先 resolve（最多 2 次 HTTP），后 receive 60 秒；最多 3 次尝试即 6 次 HTTP/3 次签名握手。无自然礼物不延长、不送礼。
+
+### 剩余限制
+
+- 首页是否仍在普通 GET 响应下发 ttwid、房间是否提供支持形态的 visitor 字段、程序 UA 是否被接受，均未用当前真实平台验证。若缺少则报告具体缺口；不是把手工凭据继续作为默认必填项。
+- signer 仍使用上一轮的空 cursor、当前 internal_ext 与允许的 lf WSS 主机；HTTP A-Bogus/IM fetch 未实现，是否必须获取服务端 cursor/push server 仍是线上未知。没有照抄旧历史参数来伪装成功。
+- 页面要求登录或验证时停止交给用户处理；不保证所有房间允许游客访问，也不因 HTTP 200 或握手成功宣称业务接收通过。
