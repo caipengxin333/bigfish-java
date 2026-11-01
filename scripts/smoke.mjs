@@ -13,6 +13,12 @@ const status = await json('/api/v1/bootstrap')
 assert.equal(status.body.mode, 'READY')
 const providers = await json('/api/v1/providers')
 assert.equal(providers.status, 200); assert.equal(providers.body.douyin.enabled, false)
+assert.equal(providers.body.douyin.reason, 'LIVE_RECEIVE_NOT_VERIFIED')
+assert.ok(['STATIC', 'RAM', 'INVALID'].includes(providers.body.aliyunToken.mode))
+const diagnostics = await json('/api/v1/runtime/diagnostics')
+assert.equal(diagnostics.status, 200)
+assert.ok(Array.isArray(diagnostics.body.waiting))
+assert.ok(Array.isArray(diagnostics.body.recent) && diagnostics.body.recent.length <= 20)
 assert.equal(status.body.capabilities.speech, providers.body.aliyun.enabled)
 for (const path of ['/admin', '/stage']) {
   const page = await fetch(base + path)
@@ -36,4 +42,4 @@ try {
     assert.equal(restored.status, 200, 'Could not restore original settings; another writer may have updated them')
   }
 }
-console.log('PASS: health, capability flags, bundled admin/stage pages, persisted configuration and stale-version rejection. Original settings restored.')
+console.log('PASS: health, provider/token state, bounded diagnostics, bundled admin/stage pages, persisted configuration and stale-version rejection. Original settings restored.')

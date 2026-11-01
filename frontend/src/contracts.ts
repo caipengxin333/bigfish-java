@@ -18,6 +18,24 @@ export interface ProviderState { configured: boolean; enabled: boolean; state: s
 export interface ProvidersView {
   deepseek: ProviderState; aliyun: ProviderState; douyin: ProviderState;
   aliyunVoices: string[]; speechTextLimit: number; audioDurationLimitSeconds: number;
+  aliyunToken: NlsTokenState;
+}
+export interface NlsTokenState {
+  mode: 'STATIC' | 'RAM' | 'INVALID'; status: string; expiresAt: string | null; remainingSeconds: number | null;
+  refreshResult: string; lastError: string; lastAttemptAt: string | null; lastSuccessAt: string | null;
+  retryAfterMillis: number; attempts: number;
+}
+export interface DiagnosticTrace {
+  sequence: number; taskId: string; eventType: string; configVersion: number; stage: string; reason: string;
+  at: string; previousStageMs: number; taskElapsedMs: number;
+}
+export interface RuntimeDiagnosticsView {
+  sessionId: string; state: RuntimeView['state']; capturedAt: string; waiting: string[];
+  lastReceivedAt: string | null; lastModelSuccessAt: string | null; lastSpeechSuccessAt: string | null; lastPlaybackSuccessAt: string | null;
+  lastFailure: DiagnosticTrace | null; recent: DiagnosticTrace[]; taskEvictions: number; historyEvictions: number;
+  audioAssets: number; dedupEntries: number;
+  modelWorker: { threads: number; active: number; queued: number; completed: number };
+  speechWorker: { threads: number; active: number; queued: number; completed: number };
 }
 export interface ModelCheck {
   authentication: 'NOT_CHECKED' | 'PASSED' | 'FAILED'; selectedModel: 'NOT_CHECKED' | 'PASSED' | 'FAILED';

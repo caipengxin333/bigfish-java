@@ -110,6 +110,11 @@ class StageWebSocketIntegrationTest {
         assertThat(status.path("collector").path("emitted").asLong()).isEqualTo(3);
         assertThat(status.path("collector").path("duplicates").asLong()).isEqualTo(1);
         assertThat(status.path("collector").path("rejected").asLong()).isZero();
+        var trace=mapper.readTree(get("/api/v1/runtime/diagnostics").body());
+        assertThat(trace.path("sessionId").asText()).isEqualTo(session);
+        assertThat(trace.path("lastPlaybackSuccessAt").isTextual()).isTrue();
+        assertThat(trace.path("recent").toString()).contains("COMPLETED").doesNotContain("模拟观众","小心心");
+        assertThat(trace.path("recent").size()).isLessThanOrEqualTo(20);
     }
     private byte[] post(String path, Object body, int expected) throws Exception {
         var response = http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+port+path))

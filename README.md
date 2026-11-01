@@ -8,12 +8,12 @@
 
 | 能力 | 当前状态 |
 | --- | --- |
-| 管理页面 | 配置保存、会话启停、供应商状态、队列和错误诊断 |
+| 管理页面 | 配置保存、会话启停、供应商与 Token 状态、队列、任务阶段和最近成功时间 |
 | 评论与礼物处理 | 评论调用模型，礼物默认使用感谢模板；支持去重、连击合并、优先级、队列容量和过期控制 |
 | DeepSeek | 已接入会话，支持模型目录检查和真实回复；也可选择 MOCK 回复 |
-| 阿里云 NLS | 已接入人声合成，已验证知柜（`zhigui`）短句合成与浏览器播放；当前使用手动配置的 Token |
+| 阿里云 NLS | 已验证知柜（`zhigui`）静态 Token 短句合成与浏览器播放；支持默认 STATIC 和显式 RAM 按需获取/续期，RAM 云端验收待完成 |
 | 浏览器舞台 | 音频、字幕、音量驱动嘴型、独占播放端和播放回执；当前为原创 SVG 鱼形角色 |
-| 抖音采集 | 已有房间解析、连接和协议处理模块，缺少可用签名实现，主会话暂不开放 `DOUYIN` 来源 |
+| 抖音采集 | 已实现原生 Java 签名、游客会话自动获取、房间解析和协议处理；本地链路通过，真实接收待验证，主会话暂不开放 `DOUYIN` 来源 |
 | Live2D / 长时间运行 | Live2D 尚未接入；长期连续运行和 OBS 后台播放尚未完成验收 |
 
 舞台当前需要保持前台：切换到后台会静音并断开，返回后需重新连接和启用声音。填入房间号不会自动启用真实抖音采集。
@@ -78,9 +78,14 @@
 | `BIGFISH_ALLOW_PAID` | 设为 `true` 才允许云服务调用，默认 `false` |
 | `BIGFISH_DEEPSEEK_API_KEY` | DeepSeek API Key，仅测试阿里云时可不填 |
 | `BIGFISH_ALIYUN_NLS_APP_KEY` | 阿里云智能语音交互 NLS 项目的 AppKey，仅测试 DeepSeek 时可不填 |
-| `BIGFISH_ALIYUN_NLS_TOKEN` | NLS Token，不是 DashScope API Key；当前过期后需更新并重启后端 |
+| `BIGFISH_ALIYUN_NLS_TOKEN_MODE` | 可选：默认 `STATIC`；显式设为 `RAM` 使用 AccessKey 按需签发与续期 |
+| `BIGFISH_ALIYUN_NLS_TOKEN` | STATIC 模式的 NLS Token，不是 DashScope API Key；过期后需更新并重启后端 |
+| `BIGFISH_ALIYUN_ACCESS_KEY_ID` | 仅 RAM 模式需要，与 NLS 项目权限匹配的阿里云 AccessKey ID |
+| `BIGFISH_ALIYUN_ACCESS_KEY_SECRET` | 仅 RAM 模式需要，对应 AccessKey Secret；不支持把 STS 临时凭据当作此模式使用 |
 
 凭据不在网页填写，不保存在业务数据库中，也不应提交到 Git。仅在仓库中创建 `.env` 文件不会自动加载这些值。
+
+已有 AppKey + 静态 Token 的配置可以直接沿用。RAM 模式首次合成时才签发 Token，接近到期时按需刷新；启动、配置保存和状态轮询不发签发请求。模式与凭据更改需要重启，RAM 失败不会自动改用静态 Token。页面展示到期时间、刷新结果及固定错误码，不返回密钥值。
 
 配置完成后：
 
@@ -91,6 +96,8 @@
 5. 在前台舞台连接并启用声音，发送模拟评论验证模型回复，发送模拟礼物验证模板感谢。测试按钮可能触发所选云服务并产生费用；启动会话本身不发送模型或合成请求。
 
 当前 NLS 输入上限为 300 个 UTF-16 字符，主会话音频上限为 25 秒，超限会报错。模型调用整体期限为 20 秒，语音合成为 10 秒，重试受同一个期限约束。模型与语音失败分别展示错误码。
+
+如果没有声音，可在管理页或舞台查看“当前阶段”和最近模型、合成、播放成功时间；管理页可展开最近任务阶段。诊断区分没有消息、播放端未就绪、模型/语音等待、播放等待与取消后仍忙的工作线程。历史错误与当前等待状态分别显示，详细轨迹只保留有限条数和 5 分钟，不是永久日志。
 
 详细说明：[DeepSeek](docs/providers/deepseek.md) · [阿里云 NLS](docs/providers/aliyun-nls.md) · [抖音采集限制](docs/providers/douyin.md)。
 
@@ -161,7 +168,8 @@ npm run build
 
 ## 更多文档
 
-- 接口与协议：[HTTP API](docs/openapi.yaml)、[事件格式](docs/event-schema.md)、[播放协议](docs/playback-protocol.md)。
+- 接口与协议：[HTTP API](docs/openapi.yaml)（包含只读 `/api/v1/runtime/diagnostics`）、[事件格式](docs/event-schema.md)、[播放协议](docs/playback-protocol.md)。
+- 运行排查：[运行稳定性与诊断](docs/runtime-stability.md)。
 - 设计与前端：[架构设计](docs/architecture.md)、[前端与舞台](frontend/README.md)。
 - 开发协作：[任务边界与合并](docs/task-boundaries.md)、[后续开发计划](docs/phase3-plan.md)。
 - 历史记录：[交接记录](docs/handoffs/)、[验证记录](docs/validation.md)。这些文档保留对应阶段的背景与验收结果，具体改动可查 Git 提交历史。
@@ -170,4 +178,4 @@ npm run build
 
 本仓库尚未指定项目许可证，当前没有 `LICENSE` 文件；许可证需由维护者确定后补充。
 
-默认角色为本项目编写的 SVG 鱼形角色，测试音由代码生成。仓库未包含第三方 Live2D 模型或抖音签名脚本；后续引入时需分别记录来源与许可证。
+默认角色为本项目编写的 SVG 鱼形角色，测试音由代码生成，未包含第三方 Live2D 模型。抖音原生签名核心采用注明 MIT 来源的 Java 移植，未引入旧项目的 JavaScript 签名脚本；范围及随包许可见 [第三方声明](THIRD_PARTY_NOTICES.md)。

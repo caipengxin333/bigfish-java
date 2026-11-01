@@ -3,6 +3,7 @@ package cn.bigfish.management;
 import cn.bigfish.configuration.ConfigStore;
 import cn.bigfish.configuration.ProviderServices;
 import cn.bigfish.contract.*;
+import cn.bigfish.management.diagnostics.RuntimeDiagnostics;
 import jakarta.validation.Valid;
 import java.util.Map;
 import org.springframework.web.bind.annotation.*;
@@ -32,6 +33,23 @@ public class ManagementController {
         return providers.checkModel(configs.snapshot().settings().model());
     }
     @GetMapping("/runtime") public RuntimeView status() { return sessions.status(); }
+    /** Fixed latest-20 window; polling only reads local state and never calls a supplier. */
+    @GetMapping("/runtime/diagnostics") public RuntimeDiagnosticsView diagnostics() {
+        var view=runtime.diagnostics(); var trace=view.trace();
+        var recent=trace.history().stream().skip(Math.max(0,trace.history().size()-20)).map(ManagementController::traceView).toList();
+        return new RuntimeDiagnosticsView(trace.sessionId(),view.runtime().state().name(),trace.capturedAt(),
+            view.waiting().stream().map(Enum::name).toList(),trace.lastReceivedAt(),trace.lastModelSuccessAt(),
+            trace.lastSpeechSuccessAt(),trace.lastPlaybackSuccessAt(),trace.lastFailure()==null ? null : traceView(trace.lastFailure()),
+            recent,trace.taskEvictions(),trace.historyEvictions(),view.audioAssets(),view.dedupEntries(),
+            workerView(view.modelWorker()),workerView(view.speechWorker()));
+    }
+    private static RuntimeDiagnosticsView.Trace traceView(RuntimeDiagnostics.Trace trace) {
+        return new RuntimeDiagnosticsView.Trace(trace.sequence(),trace.taskId(),trace.eventType()==null ? "" : trace.eventType().name(),
+            trace.configVersion(),trace.stage().name(),trace.reason().name(),trace.at(),trace.previousStageMs(),trace.taskElapsedMs());
+    }
+    private static RuntimeDiagnosticsView.Worker workerView(RuntimeEngine.WorkerStatus worker) {
+        return new RuntimeDiagnosticsView.Worker(worker.threads(),worker.active(),worker.queued(),worker.completed());
+    }
     @PostMapping("/sessions") public ResponseEntity<RuntimeView> start(@Valid @RequestBody StartSessionRequest request) {
         return ResponseEntity.status(201).body(sessions.start(request));
     }

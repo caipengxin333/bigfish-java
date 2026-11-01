@@ -1,4 +1,4 @@
-import type { ConversationMode, EventResult, ModelCheck, ProvidersView, RuntimeView, SpeechMode } from './contracts.ts'
+import type { ConversationMode, DiagnosticTrace, EventResult, ModelCheck, NlsTokenState, ProvidersView, RuntimeDiagnosticsView, RuntimeView, SpeechMode } from './contracts.ts'
 import { RequestError } from './api.ts'
 const object = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x)
 const count = (x: unknown) => Number.isSafeInteger(x) && Number(x) >= 0
@@ -15,10 +15,31 @@ export function isRuntime(x: unknown): x is RuntimeView {
     c.mode === 'MOCK' && ['STOPPED', 'CONNECTING', 'CONNECTED', 'RECONNECTING', 'ENDED', 'FAILED'].includes(String(c.state)) && typeof c.lastError === 'string'
 }
 const strings = (x: unknown): x is string[] => Array.isArray(x) && x.every(v => typeof v === 'string')
+const timestamp = (x: unknown): x is string => typeof x === 'string' && Number.isFinite(Date.parse(x))
+const optionalTimestamp = (x: unknown) => x === null || timestamp(x)
+export function isTokenState(x: unknown): x is NlsTokenState {
+  return object(x) && ['STATIC', 'RAM', 'INVALID'].includes(String(x.mode)) &&
+    ['status', 'refreshResult', 'lastError'].every(k => typeof x[k] === 'string') &&
+    [x.expiresAt, x.lastAttemptAt, x.lastSuccessAt].every(optionalTimestamp) &&
+    (x.remainingSeconds === null || count(x.remainingSeconds)) && [x.retryAfterMillis, x.attempts].every(count)
+}
+function isTrace(x: unknown): x is DiagnosticTrace {
+  return object(x) && ['taskId', 'eventType', 'stage', 'reason'].every(k => typeof x[k] === 'string') && timestamp(x.at) &&
+    [x.sequence, x.configVersion, x.previousStageMs, x.taskElapsedMs].every(count)
+}
+export function isDiagnostics(x: unknown): x is RuntimeDiagnosticsView {
+  return object(x) && typeof x.sessionId === 'string' && timestamp(x.capturedAt) &&
+    ['STOPPED', 'STARTING', 'RUNNING', 'STOPPING', 'FAILED'].includes(String(x.state)) &&
+    strings(x.waiting) && x.waiting.length <= 10 &&
+    [x.lastReceivedAt, x.lastModelSuccessAt, x.lastSpeechSuccessAt, x.lastPlaybackSuccessAt].every(optionalTimestamp) &&
+    (x.lastFailure === null || isTrace(x.lastFailure)) && Array.isArray(x.recent) && x.recent.length <= 20 && x.recent.every(isTrace) &&
+    [x.taskEvictions, x.historyEvictions, x.audioAssets, x.dedupEntries].every(count) &&
+    [x.modelWorker, x.speechWorker].every(w => object(w) && [w.threads, w.active, w.queued, w.completed].every(count))
+}
 export function isProviders(x: unknown): x is ProvidersView {
   return object(x) && ['deepseek', 'aliyun', 'douyin'].every(k => {
     const p = x[k]; return object(p) && typeof p.configured === 'boolean' && typeof p.enabled === 'boolean' && typeof p.state === 'string' && typeof p.reason === 'string'
-  }) && strings(x.aliyunVoices) && count(x.speechTextLimit) && count(x.audioDurationLimitSeconds)
+  }) && strings(x.aliyunVoices) && count(x.speechTextLimit) && count(x.audioDurationLimitSeconds) && isTokenState(x.aliyunToken)
 }
 export function isModelCheck(x: unknown): x is ModelCheck {
   return object(x) && ['authentication', 'selectedModel', 'generation'].every(k => ['NOT_CHECKED', 'PASSED', 'FAILED'].includes(String(x[k]))) &&
@@ -31,7 +52,8 @@ const messages: Record<string, string> = {
   PROVIDER_UNAVAILABLE: '模型服务不可用，请检查服务端凭据和显式启用设置。',
   PAID_CALLS_DISABLED: '后端尚未启用云服务调用：请设置 BIGFISH_ALLOW_PAID=true 后重启后端。',
   DEEPSEEK_MISSING_CREDENTIALS: '后端未配置 DeepSeek API Key。',
-  NLS_MISSING_CREDENTIALS: '后端未配置阿里云 NLS AppKey 和 Token。',
+  NLS_MISSING_CREDENTIALS: '请检查后端 AppKey，以及当前模式需要的静态 Token 或 RAM AccessKey。',
+  NLS_TOKEN_MODE_INVALID: '后端 Token 模式只支持 STATIC 或 RAM，请修正后重启。',
   NLS_UNSUPPORTED_VOICE: '音色不受阿里云 NLS 支持，请先在配置页保存 xiaoyun 等支持的音色。',
   AUTHENTICATION_FAILED: 'DeepSeek 凭据验证失败。', RATE_LIMITED: '服务正在限流，请稍后重试。',
 }
@@ -56,6 +78,7 @@ export function createRuntimeApi(fetcher: typeof fetch = fetch, timeout = 8000) 
   }
   return {
     status: () => request('/runtime', isRuntime),
+    diagnostics: () => request('/runtime/diagnostics', isDiagnostics),
     providers: () => request('/providers', isProviders),
     checkModel: () => request('/providers/deepseek/check', isModelCheck, {}, false, Math.max(timeout, 15000)),
     start: (conversationMode: ConversationMode = 'MOCK', speechMode: SpeechMode = 'LOCAL_TEST_TONE') => request('/sessions', isRuntime, { mode: 'MOCK', conversationMode, speechMode }),

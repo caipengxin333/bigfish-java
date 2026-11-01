@@ -86,11 +86,36 @@ class SessionApiIntegrationTest {
                 .andExpect(status().isBadRequest());
         mvc.perform(get("/api/v1/providers")).andExpect(status().isOk())
             .andExpect(jsonPath("$.deepseek.enabled").value(false)).andExpect(jsonPath("$.aliyun.enabled").value(false))
-            .andExpect(jsonPath("$.douyin.reason").value("SIGNER_NOT_IMPLEMENTED"))
+            .andExpect(jsonPath("$.douyin.reason").value("LIVE_RECEIVE_NOT_VERIFIED"))
+            .andExpect(jsonPath("$.aliyunToken.attempts").value(0))
             .andExpect(jsonPath("$.aliyunVoices").isArray()).andExpect(jsonPath("$.speechTextLimit").value(300));
         mvc.perform(post("/api/v1/providers/deepseek/check"))
             .andExpect(status().isServiceUnavailable()).andExpect(jsonPath("$.code").value("PAID_CALLS_DISABLED"));
         String session=start();
         mvc.perform(get("/api/v1/runtime")).andExpect(jsonPath("$.lastError").value("")).andExpect(jsonPath("$.lastErrorAt").value(""));
+    }
+    @Test void diagnosticsAreBoundedRedactedAndResetWithTheSession() throws Exception {
+        String session=start();
+        mvc.perform(get("/api/v1/runtime/diagnostics")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.sessionId").value(session))
+            .andExpect(jsonPath("$.waiting").value(org.hamcrest.Matchers.hasItem("NO_MESSAGES")))
+            .andExpect(jsonPath("$.waiting").value(org.hamcrest.Matchers.hasItem("PLAYER_NOT_READY")));
+        var event=mapper.createObjectNode().put("schemaVersion",1).put("sessionId",session).put("roomId","mock-room")
+            .put("type","COMMENT").put("userId","sensitive-user-fixture").put("username","sensitive-name-fixture").put("receivedAt",Instant.now().toString());
+        event.putObject("payload").put("content","sensitive-comment-fixture");
+        for(int i=0;i<15;i++) {
+            event.put("eventId","external-event-fixture-"+i);
+            mvc.perform(post("/api/v1/events/simulate").contentType("application/json").content(mapper.writeValueAsString(event)))
+                .andExpect(status().isAccepted());
+        }
+        var response=mvc.perform(get("/api/v1/runtime/diagnostics")).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat(response).doesNotContain("sensitive-","external-event-fixture-");
+        var view=mapper.readTree(response);
+        assertThat(view.path("recent").size()).isEqualTo(20);
+        assertThat(view.path("waiting").toString()).contains("MODEL_WAIT");
+        assertThat(view.path("recent").toString()).contains("QUEUE_FULL");
+        sessions.stop(session); String next=start();
+        mvc.perform(get("/api/v1/runtime/diagnostics")).andExpect(jsonPath("$.sessionId").value(next))
+            .andExpect(jsonPath("$.recent").isEmpty()).andExpect(jsonPath("$.lastFailure").isEmpty());
     }
 }

@@ -27,4 +27,4 @@
 - Live2D 模型及第三方采集代码要记录来源与许可证，不把“可下载”等同于可分发。未经确认不复制旧模型或 AGPL 签名脚本进新仓库。
 - 后端验证：`./scripts/maven.sh test`；前端：`cd frontend && npm ci && npm run build`。具体行为需要针对性测试。
 - 日志记录 error type、耗时和脱敏上下文，不打印 Cookie、签名 URL 或 Key。
-- 当前已集成配置、MOCK 采集/调度、管理 REST/WebSocket、DeepSeek/NLS 会话选择和供应商状态；2026-11-01 已验证 NLS 知柜真实合成、解码及 Safari 播放回执，抖音尚缺可用 signer，长期稳定性未验收。最新结果见 docs/handoffs/phase2-integration.md；语音维护须保留 docs/handoffs/phase2-speech.md 中的 PCM 转 WAV 修复。
+- 当前已集成配置、MOCK 采集/调度、DeepSeek/NLS、只读任务诊断和 STATIC/RAM Token 工厂/状态。抖音已有原生 signer 与游客会话获取，本地验证通过但真实接收未验收，主会话继续禁用 DOUYIN。最新集成结果见 docs/handoffs/phase3-integration.md；RAM 云端签发与长期稳定性未验收。语音维护须保留 c8be17c 的 PCM 转 WAV 修复和现有 STATIC 配置兼容。
