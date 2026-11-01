@@ -110,6 +110,8 @@ collector.start(currentCanonicalWebRoom, sessionId, boundedEventIngress);
 
 实现提交：**`7cf5ac7bd1f9440627fe96e8967941ce46c63236`**（`feat(collector): bootstrap guest sessions from room links`）。此前原生 signer 实现 `f02caaaa15758f48b89b343e0ad009a5aaa6b74b` 保留；本次没有修改签名算法或 SPI 描述文件，没有新增 Maven/Node/浏览器依赖。
 
+交付复核：文档提交后工作区干净，再次 `git merge --no-edit main` 返回 Already up to date，main 仍为 `55a6fa04758b86be5550af5fd1c3d07cbc560b3c`；祖先检查返回 0。同步后串行回归于 17:39:50 通过，未推送；本轮差异仅在 collector、对应测试和两份授权文档。
+
 ### 默认输入和自动流程
 
 - 用户仅提供支持的规范网页链接或 1～30 位数字网页房间号，详见 [provider 使用说明](../providers/douyin.md)。仍不自动跟随短链接、跨域或任意重定向。
@@ -132,6 +134,7 @@ collector.start(currentCanonicalWebRoom, sessionId, boundedEventIngress);
 | --- | --- |
 | `./scripts/maven.sh -B -ntp test`，17:34:27 | 159 项，158 通过、1 跳过，18.145 秒 |
 | `./scripts/maven.sh -B -ntp test`，17:36:27，最终代码串行重编译 | **160 项，159 通过、1 跳过，0 失败/错误；collector 78/78 通过；18.022 秒** |
+| `./scripts/maven.sh -B -ntp test`，17:39:50，交付同步后串行回归 | **BUILD SUCCESS；160 项，159 通过、1 跳过，0 失败/错误；15.795 秒** |
 | `env BIGFISH_DOUYIN_LIVE_PROBE=false ./scripts/dev-backend.sh -B -ntp -Dspring-boot.run.main-class=cn.bigfish.collector.DouyinCollectorProbe` | 输出 PROBE_DISABLED；Java 退出 2 / Maven 退出 1 是预期保护；4.660 秒，无平台请求 |
 | 仅房间号 → 本地 JDK HTTP → 原生签名 → 本地 JDK WS → 事件接收器 | 2 次回环 HTTP（首页+房间）、1 次签名、1 次握手；6 条合成事件、礼物增量 1/2/1、3 个重复抑制、1 个异常包；ACK/心跳、ENDED 与资源释放通过；17:36 回归用例 0.042 秒 |
 | 原有外部凭据本地链路 | 保留原断言，同样通过；本地 1 次 HTTP、1 次签名/握手；0.019 秒 |
