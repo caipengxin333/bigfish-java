@@ -14,6 +14,20 @@ import static org.assertj.core.api.Assertions.*;
 
 class RuntimeDiagnosticsTest {
     @TempDir Path directory;
+    @Test void rejectedWorkerHandoffRestoresFifoWithoutGrowingQueue() {
+        record Item(int id, int priority, Instant expiresAt) implements cn.bigfish.scheduler.BoundedPriorityQueue.Item {}
+        var discarded=new ArrayList<Item>();
+        var queue=new cn.bigfish.scheduler.BoundedPriorityQueue<Item>(discarded::add);
+        var now=Instant.parse("2026-11-01T00:00:00Z");
+        var first=new Item(1,50,now.plusSeconds(60)); var second=new Item(2,50,now.plusSeconds(60));
+        queue.offer(first,2,now); queue.offer(second,2,now);
+        assertThat(queue.poll(now)).isEqualTo(first);
+        queue.restoreFirst(first,2,now);
+        assertThat(queue.size()).isEqualTo(2); assertThat(queue.poll(now)).isEqualTo(first); assertThat(queue.poll(now)).isEqualTo(second);
+        assertThat(discarded).isEmpty();
+        assertThat(queue.restoreFirst(first,2,now.plusSeconds(60))).isFalse();
+        assertThat(discarded).containsExactly(first); assertThat(queue.size()).isZero();
+    }
     @Test void historyTaskTableRetentionAndSessionFenceAreBounded() {
         var clock=new CoreRig.MutableClock(); var d=new RuntimeDiagnostics(clock); d.begin("s");
         for(int i=0;i<10_000;i++) {

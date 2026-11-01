@@ -18,6 +18,7 @@ public final class BoundedPriorityQueue<T extends BoundedPriorityQueue.Item> {
     private final List<Entry<T>> entries = new ArrayList<>();
     private final BiConsumer<T,DiscardReason> discard;
     private long sequence;
+    private long restoredSequence;
     public BoundedPriorityQueue(Consumer<T> discard) { this((item,reason) -> discard.accept(item)); }
     private BoundedPriorityQueue(BiConsumer<T,DiscardReason> discard) { this.discard = discard; }
     public static <T extends Item> BoundedPriorityQueue<T> withReasons(BiConsumer<T,DiscardReason> discard) {
@@ -25,6 +26,13 @@ public final class BoundedPriorityQueue<T extends BoundedPriorityQueue.Item> {
     }
 
     public synchronized boolean offer(T item, int capacity, Instant now) {
+        return offer(item,capacity,now,false);
+    }
+    /** Restore a just-polled, not-yet-executed item ahead of equal-priority peers after worker handoff rejection. */
+    public synchronized boolean restoreFirst(T item, int capacity, Instant now) {
+        return offer(item,capacity,now,true);
+    }
+    private boolean offer(T item, int capacity, Instant now, boolean restore) {
         trim(capacity, now);
         if (!item.expiresAt().isAfter(now)) { discard.accept(item,DiscardReason.EXPIRED); return false; }
         if (entries.size() == capacity) {
@@ -32,7 +40,7 @@ public final class BoundedPriorityQueue<T extends BoundedPriorityQueue.Item> {
             if (item.priority() < worst.value().priority()) { discard.accept(item,DiscardReason.FULL); return false; }
             remove(worst,DiscardReason.FULL);
         }
-        entries.add(new Entry<>(sequence++, item));
+        entries.add(new Entry<>(restore ? --restoredSequence : sequence++, item));
         return true;
     }
     public synchronized void trim(int capacity, Instant now) {

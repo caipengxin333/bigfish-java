@@ -198,11 +198,11 @@ public final class RuntimeEngine implements EventIngress {
         return null;
     }
     private void startModel(Job job) {
-        trace(job,Stage.MODEL_STARTED,Reason.NONE);
         Duration deadline = remaining(job,modelTimeout); modelUntil = clock.instant().plus(deadline);
         ConversationPort port = conversation;
         try {
             modelCall = modelWorker.submit(() -> {
+                trace(job,Stage.MODEL_STARTED,Reason.NONE);
                 StringBuilder reply = new StringBuilder();
                 try {
                     port.reply(job.id(),job.event(),job.config(),deadline, text -> {
@@ -226,15 +226,15 @@ public final class RuntimeEngine implements EventIngress {
             });
         } catch (RejectedExecutionException error) {
             modelJob = null; modelCall = null;
-            if (comments.offer(job,configs.snapshot().settings().synthesisQueueCapacity(),clock.instant())) trace(job,Stage.MODEL_WAIT,Reason.WORKER_BUSY);
+            if (comments.restoreFirst(job,configs.snapshot().settings().synthesisQueueCapacity(),clock.instant())) trace(job,Stage.MODEL_WAIT,Reason.WORKER_BUSY);
         }
     }
     private void startSpeech(Job job) {
-        trace(job,Stage.SPEECH_STARTED,Reason.NONE);
         Duration deadline = remaining(job,"ALIYUN_NLS".equals(speechMode) ? Duration.ofSeconds(10) : speechTimeout); speechUntil = clock.instant().plus(deadline);
         SpeechPort port=speech;
         try {
             speechCall = speechWorker.submit(() -> {
+                trace(job,Stage.SPEECH_STARTED,Reason.NONE);
                 SpeechPort.AudioAsset asset=null;
                 boolean releaseAttempted=false;
                 try {
@@ -263,7 +263,7 @@ public final class RuntimeEngine implements EventIngress {
             });
         } catch (RejectedExecutionException error) {
             speechJob = null; speechCall = null;
-            if (synthesis.offer(job,configs.snapshot().settings().synthesisQueueCapacity(),clock.instant())) trace(job,Stage.SPEECH_WAIT,Reason.WORKER_BUSY);
+            if (synthesis.restoreFirst(job,configs.snapshot().settings().synthesisQueueCapacity(),clock.instant())) trace(job,Stage.SPEECH_WAIT,Reason.WORKER_BUSY);
         }
     }
     private static final class EmptyModelReply extends RuntimeException {}
