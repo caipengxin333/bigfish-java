@@ -1,3 +1,101 @@
+# 入站 MALFORMED 解码修复与首次有效接收（2026-11-02）
+
+本节为最新交接；下方 2026-11-01 页面初始化及首轮记录保留历史背景，不能覆盖本节实测结果。
+
+## 提交、基线与范围
+
+- 工作目录：collector worktree；分支：feature/douyin-collector。开工 pwd / branch / status 正确且干净，快进合入最新 main **ab9d532a4ed8b8f5feb64badccd48470a85db330**。
+- 实现与测试提交：**4bbab803d1bf4eca6b2c4d7e6763a741f90519d7**（fix(collector): decode protobuf payloads with independent compression headers）。
+- 实现提交后工作区干净，交付前 git merge --no-edit main 返回 Already up to date，祖先检查通过。本文另作文档提交，其 SHA 由本窗口最终回复提供。
+- 修改仅 collector 包及对应 collector 测试、本交接。没有改页面初始化、原生 signer、连接参数、Vue、会话管理、模型、语音、公共 DTO / REST / 依赖版本；没有修改旧项目或主工作树，没有批量删除、推送、PR 或联系其他窗口。
+
+## 明确根因与证据
+
+**失败发生在 DouyinProtocol.decode 的 PAYLOAD 编码判定阶段，早于 gzip 解压和 Response 解析。** 旧实现把 PushFrame.payload_encoding（字段 6）当作压缩方式，只允许空值 / gzip / identity。实际入站结构样本中字段 6 是 **pb**（wire type 2、长度 2），载荷是 gzip；pb 表示 Protobuf 序列化，与压缩是不同维度。旧逻辑因此对这种有效帧抛出异常，consume 汇成 MALFORMED，整批消息和 ACK 都不可达。
+
+证据链：
+
+1. 固定 revision 协议定义核对：PushFrame 5 为重复 PushHeader，6 为 payload_encoding，7 为 payload_type，8 为 payload；Response 1 为重复消息、5 为 internal_ext、9 为 need_ack。没有猜测或调整这些字段编号。
+2. 修复前新增人工回归：手写 pb + compress_type=gzip 的外层字节前缀，旧实现报 Invalid protocol packet；仅头部 im-internal_ext 的 ACK 回归也失败。两项测试为 1 failure + 1 error。完整独立手写明文 pb 评论字节向量另行验证，避免仅由生产解码器和测试编码器共享假设。
+3. 本轮唯一一次真实 receive 的结构样本确认 **PB + gzip**。首个完整帧 10536 字节，由 3 个 JDK 二进制回调分片组成；压缩载荷 10217 字节，解压后 53293 字节，Response 含 25 条消息。这里只保留长度和字段形状，没有保留真实字节、字段值、用户信息或评论正文。
+4. 修复后 73 个完整帧均通过 PUSH / PAYLOAD / DECOMPRESS / RESPONSE / MESSAGE_LIST，0 分片失败、0 队列过期或满、0 解码或归一化 MALFORMED；实际派发评论 24 条。因此本次不是以 CONNECTED 或 HTTP 200 代替接收验收。
+5. 上次 92 个错误包没有保存原帧，不能逐帧追溯这 92 次是否完全相同。本次已直接确认一个会导致旧实现整批拒绝的线上结构，并验证修复后有效接收；不对未保存的历史帧虚构额外证据。
+
+## 修复与内部诊断
+
+- 分离载荷序列化与压缩：明确接受 pb，读取白名单头 compress_type，支持 gzip / identity；保留旧 payload_encoding=gzip 和 gzip magic 兼容。未知编码、冲突压缩头、坏 gzip、解压超限仍拒绝，没有无限放宽限制。
+- ACK：优先逐字节回显头部 im-internal_ext；无头部扩展时，仅 need_ack 为真才使用 Response.internal_ext。头部扩展自身可要求 ACK，不能只看 Response 标志。仍使用本帧 logId；缺 logId、扩展超 8192 字节或冲突头拒绝。ACK 在归一化/业务派发前发送；失败不伪计成功。真实 73 次 ACK 均使用头部来源；“无 need_ack 但有头部”的分支为本地覆盖，不额外声称其真实占比。
+- Response 列表中单个错误 wire type / 坏 envelope / 坏具体消息单独记录，保留同批其他有效消息和有效 ACK。未知 method 计 UNKNOWN，未尝试将其视为结构损坏；未知 method 文本不记录。
+- ProtoWire 保持原有 wire / UTF-8 / varint / 长度检查，为失败附加固定原因码和数字字段信息；重复标量仍按 wire 规范取最后一个值。没有引入通用生成式 Protobuf 或复制 proto。
+- 内部 InboundDiagnostics 覆盖 ASSEMBLY、QUEUE、PUSH、PAYLOAD、DECOMPRESS、RESPONSE、ACK_META、MESSAGE_LIST、ENVELOPE、BODY、COMMON、ROOM、USER、GIFT、EVENT、NORMALIZE。只存固定枚举与长度/数量/字段号/wire type。
+- 硬上限：128 个计数键、64 个结构摘要，每个阶段/原因最多 3 份，每份最多 12 个字段形状；成功摘要最多 32 份，为失败预留容量。不会保存异常对象/message/cause、原帧、hex、正文、昵称、UID、Cookie、签名 URL 或凭据。仅独立 probe 输出摘要，未扩展 REST DTO 或主页面。
+- 保持 2 MiB 单帧及解压上限、4096 字段/对象、512 消息/Response、队列容量与 TTL、房间一致性、取消和退出保护。新增头部处理最多 64 项 / 总 64 KiB，ACK 扩展仍 8 KiB。
+- probe 新增可选 BIGFISH_DOUYIN_PROBE_MAX_ATTEMPTS（1–3，默认 3）；本次显式 1，不自动反复探测。默认测试不联网。
+
+## 来源与许可
+
+仅核对公开字段和行为，解析/诊断仍为本项目独立 Java 实现；没有复制或执行旧 AI-Vtuber AGPL 脚本、第三方 generated 类或上游 proto，没有新增依赖。
+
+| 参考 | 固定版本 / 许可 | 本轮用途 |
+| --- | --- | --- |
+| [jwwsjlm/douyinLive message_decode.go](https://github.com/jwwsjlm/douyinLive/blob/af34f7c2ea2c4df90c6f4659e967fb31815d9255/message_decode.go)、[utils.go](https://github.com/jwwsjlm/douyinLive/blob/af34f7c2ea2c4df90c6f4659e967fb31815d9255/utils/utils.go) | af34f7c2ea2c4df90c6f4659e967fb31815d9255；[MIT，Copyright 2025 今晚打打](https://github.com/jwwsjlm/douyinLive/blob/af34f7c2ea2c4df90c6f4659e967fb31815d9255/LICENSE) | 核对头部 compress_type 及 im-internal_ext ACK 语义；未复制 Go 实现 |
+| [douyinlive-proto new_douyin.proto](https://github.com/jwwsjlm/douyinlive-proto/blob/0d661be57c8f80947054b2ef0cd1ac2fdce3cc4b/protobuf/new_douyin.proto) | v0.1.3 = 0d661be57c8f80947054b2ef0cd1ac2fdce3cc4b；该文件 blob 8f336c61ccd9816eea76ff05b187c0da9f503fe3；[MIT，Copyright 2026 jwwsjlm](https://github.com/jwwsjlm/douyinlive-proto/blob/0d661be57c8f80947054b2ef0cd1ac2fdce3cc4b/LICENSE) | 只核对上列字段事实与消息映射，不纳入 schema / 生成类 |
+| [Protobuf wire format 官方说明](https://protobuf.dev/programming-guides/encoding/) | 在线只读参考，2026-11-02 核对 | 字段 tag、wire type、重复标量语义 |
+
+这些是非官方网页协议参考，不代表平台承诺的稳定开放 API；根许可证也不被解释为旧 AGPL 代码的替代授权。已有 native signer 的 MIT 声明与采用范围保持不变。
+
+## 自动测试与本地替身证据
+
+| 命令 / 阶段 | 结果 |
+| --- | --- |
+| 基线 ./scripts/maven.sh -B -ntp -pl backend '-Dtest=cn.bigfish.collector.*Test' test | 沙箱内 12 项因本机 bind 权限失败；按权限流程重跑 **83/83 通过**，没有跳过或弱化断言 |
+| -Dtest=DouyinInboundStructureTest test（修复前） | 2 项：1 failure + 1 error，复现编码拒绝和缺 ACK |
+| -Dtest=DouyinProtocolTest,DouyinInboundStructureTest test（修复后扩展） | **15/15 通过** |
+| 全部采集测试（最终代码） | **90/90 通过**，6.292 秒，2026-11-02 00:18:39 +08:00 完成 |
+| ./scripts/maven.sh -B -ntp test（最终代码） | **244 项：242 通过，2 项真实 NLS/Token 默认跳过，0 failure / error**；22.915 秒，00:19:25 +08:00 完成 |
+| git diff --check / git diff --cached --check | 通过 |
+
+回归覆盖：手写独立明文 pb 评论向量、pb + gzip 头、旧 gzip/无标记压缩、解压限额、非法长度/varint/UTF-8、合法未知字段、重复标量、未知类型、同批单条坏消息隔离、ACK 头优先/回退/冲突/上限、诊断采样及隐私。原生 signer + 实际回环 HTTP/WSS 链路加入 pb + gzip 分片及头部 ACK 断言，保留礼物 1/2/1 增量、同用户连击、重复终包、不同用户隔离、ENDED、幂等 stop 与资源释放断言。既有停止握手/接收/退避、重连、内部 roomId 变化测试全部保留。
+
+全部本地消息均为人工数据。本地 ENDED、礼物和故障注入不是下述真实验证的替代证据。没有运行 DeepSeek/NLS/Token 真实调用。
+
+## 本轮真实接收：独立 probe、自然消息
+
+测试房间为用户指定网页号 440132407257，未操作主项目会话或选择其他房间。
+
+| 分项 | 本轮实际结果 |
+| --- | --- |
+| 只读 resolve | LIVE，roomResolved=true；HTTP **2**，2453 ms，在途 0；00:19:44 +08:00 完成 |
+| 一次 receive | **60 秒总观察预算**（含初始化/握手；停止清理后总耗时 60117 ms）；HTTP **2**、签名 **1**、WSS 尝试 **1**、CONNECTED **1**；00:21:06 +08:00 完成，probe / Maven 均成功 |
+| 完整帧 / 阶段 | ASSEMBLY / QUEUE / PUSH / PAYLOAD / DECOMPRESS / RESPONSE / MESSAGE_LIST 各 **73** 次成功；无失败阶段，无摘要键溢出 |
+| 消息包 | ENVELOPE **137**；未知类型 **44**，单独忽略；已识别评论 **25**、入场 **46**、点赞 **22** |
+| 实际归一化并进入本地 sink | **COMMENT 24、ENTRANCE 46、LIKE 22**；重复评论去重 **1**；FOLLOW **0** |
+| 礼物 | **GIFT 0、giftUnits 0：真实礼物未验证**；不能据此断言平台没有礼物或礼物覆盖完整 |
+| 协议 | ACK **73**（ACK_HEADER），heartbeat **6**，MALFORMED **0**，reconnect **0**；lastError 为空 |
+| 停止 | 停止前 CONNECTED、停止后 STOPPED；sourceThreads / dispatchThreads / queuedEvents / attachedTransports / httpInFlight / signingWorkers **全部 0**，独立进程退出 |
+| 未发生的场景 | 真实关注、真实关播 ENDED、断线重连和长期运行未验证；资源计数仅指本采集器，不等于 JVM 所有线程 |
+
+抖音请求账本合计 **HTTP 4、WSS 1**，一次 receive，没有额外第二轮接收、自动延长或主动互动。仅发送协议 ACK / 心跳，没有评论、点赞、关注或购买礼物。所有页面/业务帧只在内存处理，没有保存真实 HTML/完整帧或用户数据。真实收到了 22 条点赞事件，不代表采集器发送了点赞。
+
+安全诊断日志（只包含固定标签、结构及计数，不提交日志）：
+- /tmp/bigfish-decode-resolve.log
+- /tmp/bigfish-decode-receive.log
+
+本地回归日志：
+- /tmp/bigfish-decode-baseline.log（沙箱失败）及 /tmp/bigfish-decode-baseline-approved.log
+- /tmp/bigfish-decode-red.log、/tmp/bigfish-decode-expanded.log
+- /tmp/bigfish-decode-collector.log、/tmp/bigfish-decode-full.log
+
+## 主窗口审核、合并及重启
+
+1. 主窗口审核实现 4bbab80 及本交接文档提交后，按既定流程合并 feature/douyin-collector；本窗口不更新 main、不推送。
+2. 无公共接口、配置迁移或新依赖提案。原有游客工厂、页面初始化和原生 signer 沿用；新诊断只在采集内部 / 独立 probe。
+3. 合并后由主窗口重跑后端回归并**重启实际运行的后端**（IDEA 需重启 Java 进程；JAR 需重新打包后运行新产物）。页面刷新不会替换旧 Java 解码类。开发启动用主窗口自身的 scripts/dev-backend.sh，保留各 worktree 端口和数据隔离。
+4. 用户主会话及“真实消息 → 模型 → 语音 → 舞台”本轮未操作、未验收；不能把本地 sink 的通过写成主会话付费全链路通过。供应商状态、README / 公共能力文案如需调整，由主窗口统一处理；本分支未自行改 true 或 VERIFIED。
+5. 后续自然出现礼物时再验真实数量/连击/用户隔离，并在获得授权后另验真实关播和断线恢复。本次不延长等待、不送礼造数据。当前交付已经获得真实有效评论，礼物仍明确未验证。
+
+---
+
 # 真实抖音房间初始化修复（2026-11-01）
 
 本节是最新交接；下方首轮记录及 `phase3-collector.md` 保留历史背景。工作树：`bigfish-worktrees/collector`，分支：`feature/douyin-collector`。
