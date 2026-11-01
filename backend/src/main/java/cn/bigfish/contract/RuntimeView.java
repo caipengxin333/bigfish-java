@@ -8,7 +8,7 @@ public record RuntimeView(String sessionId, String state, String mode, String co
     public record Queues(Queue comments, Queue templates, Queue synthesis, Queue playback,
                          boolean modelActive, boolean speechActive) {}
     public record Player(boolean connected, boolean ready, boolean playing, long leaseGeneration) {}
-    /** Counters refer to the most recent replay, engine counters to the application lifetime. */
+    /** Counters refer to the current/most recent collector run, engine counters to the application lifetime. */
     public record Collector(String mode, String state, long received, long emitted, long duplicates,
                             long rejected, String lastError) {}
 }

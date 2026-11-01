@@ -7,7 +7,7 @@
 
 ## 工作边界
 
-当前第三轮职责与独占目录见 docs/phase3-plan.md，优先于第二轮计划、第一轮 prompts 和历史宽范围分工。原前端窗口继续做 Java 阿里云 TTS；Vue、公共接口及会话接线由主集成窗口统一负责。独立 GitHub 上传按 docs/prompts/github-publish.md 执行，仅该任务在目标明确后可正常推送；三个实现窗口仍不推送。
+当前职责以用户第四/五轮任务及 docs/task-boundaries.md 为准，覆盖第三轮历史分工：后端窗口负责 Java 会话与播放生命周期，前端窗口回归 Vue 页面及浏览器音频生命周期，采集窗口独占采集解析/签名。Java 语音适配本轮没有新任务，不能因旧职责顺手修改。公共契约、文档和最终联调由主集成窗口负责，结果见 docs/handoffs/phase5-integration.md。独立 GitHub 上传按 docs/prompts/github-publish.md 执行；实现窗口仍不推送。
 1. 当前项目是独立的新实现，不是 Luna 的原地重写。首先阅读 README.md、docs/architecture.md、docs/task-boundaries.md、自己任务对应的 docs/prompts 文件。
 2. 只在指定 worktree 和分支工作；每次开工检查 `pwd`、`git branch --show-current`、`git status --short`。
    - 每轮继续开发也要同步基线，不只首次开工。功能分支先执行 `git merge-base --is-ancestor main HEAD`；非 0 表示尚未包含当前 main。保留并核对本工作树已有改动，干净后执行 `git merge --no-edit main`，再阅读最新对应 handoff。不得用复制目录、reset 或整文件选一方替代合并。
@@ -27,4 +27,4 @@
 - Live2D 模型及第三方采集代码要记录来源与许可证，不把“可下载”等同于可分发。未经确认不复制旧模型或 AGPL 签名脚本进新仓库。
 - 后端验证：`./scripts/maven.sh test`；前端：`cd frontend && npm ci && npm run build`。具体行为需要针对性测试。
 - 日志记录 error type、耗时和脱敏上下文，不打印 Cookie、签名 URL 或 Key。
-- 当前已集成配置、MOCK 采集/调度、DeepSeek/NLS、只读任务诊断和 STATIC/RAM Token 工厂/状态。抖音已有原生 signer 与游客会话获取，本地验证通过但真实接收未验收，主会话继续禁用 DOUYIN。最新集成结果见 docs/handoffs/phase3-integration.md；RAM 云端签发与长期稳定性未验收。语音维护须保留 c8be17c 的 PCM 转 WAV 修复和现有 STATIC 配置兼容。
+- 当前已集成显式 MOCK/DOUYIN 会话、DeepSeek/NLS、STATIC/RAM Token、任务诊断及舞台一键互动。DOUYIN 能力开放不代表接收通过；最近真实解析返回 PAGE_STRUCTURE_CHANGED，真实评论/礼物仍未验收。普通切后台不主动断开，冻结/失效后手动恢复同会话。最新集成结果见 docs/handoffs/phase5-integration.md；RAM 云端签发与长期后台稳定性未验收。须保留 c8be17c 的 PCM 转 WAV、停止/租约隔离及主窗口音频中断释放播放端修复。

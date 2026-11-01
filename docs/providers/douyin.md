@@ -1,6 +1,10 @@
 # 抖音采集适配器：原生签名与自动游客会话
 
-核查日期：2026-11-01。已内置 `NativeDouyinSigner` 与 `WebDouyinConnectionProvider.guest()`。默认只需规范直播链接/网页房间号，自动获取游客 Cookie、页面访客 ID 和内部房间号，再用现有原生 signer 生成短期连接参数。公开签名向量和本地 HTTP/WebSocket → 事件接收链路已验证。**尚未验证抖音当前线上接受该签名及连接参数，也没有真实评论/礼物结果。** 用户暂无当前直播间，后续一起实测。`SessionService` 接线和状态文案由集成窗口负责，现有 `bootstrap.douyinCollector=false` 不变。
+核查日期：2026-11-01。已内置 `NativeDouyinSigner` 与 `WebDouyinConnectionProvider.guest()`，并接入 `SessionService`。管理页保存数字网页房间号，明确选择 DOUYIN 后在舞台开始互动；自动获取游客 Cookie、访客 ID 与内部房间号。`bootstrap.capabilities.douyinCollector` 和 `providers.douyin.enabled` 表示启动能力已开放，不表示真实接收已验收。
+
+**最近一次真实 guest resolve 发出 2 次 HTTP，返回 PAGE_STRUCTURE_CHANGED；没有发起 WSS，真实评论/礼物均为 0。** 不能据此断言房间下播或需要登录。公共签名向量和本地链路通过，线上解析/签名接受与真实接收仍需后续验证。详见 [第四轮交接](../handoffs/phase4-douyin-session.md)。主会话失败时显示固定错误，不回退为 MOCK。
+
+保存、状态查询与应用启动不连接抖音，只有显式启动 DOUYIN 会话才连接。公开配置字段目前仅接收数字网页号；内部解析器支持规范链接不意味着配置接口接受任意 URL。`runtime.roomId` 为解析后内部号，解析前为空，不可与已保存网页号比较后认定串房。运行中配置变化不切换既有采集房间。
 
 ## 接入方式与适用范围
 
@@ -155,4 +159,4 @@ collector.start(canonicalWebRoomUrl, sessionId, boundedEngineIngress);
 
 本轮本地验证包含：仅输入房间号 → 实际 Java HTTP 获取合成首页 Cookie 和房间页面（2 次请求）→ 自动访客字段 → 原生签名 → 实际 JDK 回环 WebSocket → gzip/Protobuf → 本地事件接收器。产生 1 条 COMMENT、3 条 GIFT（增量 1/2/1）、1 条 ENTRANCE、1 条 FOLLOW；重复终包不重发，异常包后继续收取，ACK/心跳正常，关播 ENDED 后释放。此测试通过包内 seam 把传输目标替换为本机回环，不是抖音服务器对签名的验证，不能充当真实接收记录。
 
-自动游客初始化代码为独立 Java 实现，参考已有 MIT 来源中公开的 `ttwid`/`user_unique_id` 协议字段事实；没有复制旧 AI-Vtuber 的 AGPL Python/JS 代码、固定访客值、历史 URL 模板或协议脚本。原生 signer 与 MIT 版权说明保持原样，无新增依赖或后台进程。主会话/管理页仍须集成窗口改接上面的工厂；本窗口未开启 `douyinCollector` 就绪状态。
+自动游客初始化代码为独立 Java 实现，参考已有 MIT 来源中公开的 `ttwid`/`user_unique_id` 协议字段事实；没有复制旧 AI-Vtuber 的 AGPL Python/JS 代码、固定访客值、历史 URL 模板或协议脚本。原生 signer 与 MIT 版权说明保持原样，无新增依赖或后台进程。主会话已通过 SessionCollectors 接入工厂，ENDED/FAILED 会关闭处理链，旧资源未退出时返回 COLLECTOR_STOPPING；真实服务验收仍独立于能力标志。

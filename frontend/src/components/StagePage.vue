@@ -86,7 +86,7 @@ onBeforeUnmount(() => {
       </div>
       <p v-if="startBlocked" class="message warning" role="alert">{{ startBlocked }}</p>
       <p v-if="operationError" class="message error" role="alert">{{ operationError }}</p>
-      <p v-if="operationNotice" class="muted" role="status">{{ phase === 'attached' && connected ? (view.ready ? '互动会话与本页播放端已就绪。' : '互动会话已确认，等待声音授权。') : operationNotice }}</p>
+      <p v-if="operationNotice" class="muted" role="status">{{ phase === 'attached' ? (connected ? (view.ready ? '互动会话与本页播放端已就绪。' : '互动会话已确认，等待声音授权。') : view.connection === 'connecting' ? '互动会话已确认，正在连接本页播放端。' : '本页播放端未连接，请查看下方状态。') : operationNotice }}</p>
       <p v-if="disconnected" class="message warning">后端会话仍在运行，本页播放端已断开或尚未接入；不会自动重启会话。</p>
       <p class="message" role="status">本页播放端：{{ view.notice }}</p>
     </section>

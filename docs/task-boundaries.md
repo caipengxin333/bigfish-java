@@ -1,8 +1,8 @@
 # 文件边界与协作流程
 
-> 当前维护以 [第三轮计划](phase3-plan.md) 的任务与独占目录为准：后端运行稳定性、语音 Token 续期、真实采集。下文为第一/二轮历史约定。
+> 当前第四/五轮：后端负责 Java 会话与播放生命周期，前端负责 Vue 页面、一键互动与浏览器音频，采集窗口负责采集解析与签名。集成结果见 [phase5-integration.md](handoffs/phase5-integration.md)，各窗口继续前必须同步最新 main。第二/三轮计划仅作历史记录，不再将前端窗口分配给 Java 语音。
 
-> 第二轮起以 [phase2-plan.md](phase2-plan.md) 的独占目录为准：原后端窗口做 DeepSeek、原前端窗口做 Java 阿里云 TTS、采集窗口做真实抖音；下面的宽范围分工保留为第一轮记录。前端/公共管理接线由主窗口负责。
+> 下列目录是角色的最大边界，实际修改仍以当前明确任务为准；没有新任务的模块不顺手重写。公共字段、线上播放协议和依赖调整交集成窗口。
 
 | 角色 | 分支 | worktree（相对主仓库） | 后端 / 前端端口 |
 |---|---|---|---|
@@ -17,7 +17,7 @@
 
 后端：backend/src/main/java/cn/bigfish 下 configuration/event/scheduler/conversation/speech/playback/persistence/management；backend/src/main/resources（静态资源除外）；backend/src/test/java/cn/bigfish/core/；docs/handoffs/backend.md。基础集成测试如需改动提出说明，不能删除或削弱已有断言。
 
-前端：frontend/（src/contracts.ts 除外）、docs/handoffs/frontend.md。frontend/package.json 与 lockfile 可由前端维护，但不要同时更换已固定的构建框架。
+前端：frontend/、本任务 docs/handoffs/phase*-frontend*.md。src/contracts.ts 仅允许按已确认公共契约同步 TypeScript 镜像，不能自创公共字段或语义；package.json/lockfile 的依赖调整须交集成窗口。本轮不得改 Java 语音。
 
 采集：backend/src/main/java/cn/bigfish/collector/、backend/src/test/java/cn/bigfish/collector/、backend/src/test/resources/collector/、docs/handoffs/collector.md。新依赖通过提案交集成窗口统一加，不自行修改公共 POM。
 

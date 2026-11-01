@@ -1,13 +1,13 @@
 # 架构与第一阶段范围
 
-状态：三个功能分支已合并，Java MOCK 会话和 Vue 舞台闭环已接线；真实抖音与人声 TTS 待接入。开发分离、交付可合并；单 Java 进程，不引入微服务、Redis、消息中间件或配置中心。
+状态：已集成 MOCK/DOUYIN 主会话、DeepSeek/NLS 与 Vue 一键互动；真实抖音解析最近返回 PAGE_STRUCTURE_CHANGED，真实消息接收未验收。开发分离、交付可合并；单 Java 进程，不引入微服务、Redis、消息中间件或配置中心。
 
 ## 数据通路
 
 CollectorPort → EventIngress → 事件校验/去重 → 分类有界队列 → ConversationPort（评论）或礼物模板 → 语音队列 → SpeechPort → 同源音频资源 → /ws/stage → 唯一播放端 → PlaybackAck。
 
-管理端 /admin：配置、开始/停止、连接状态、队列与错误诊断。
-播放端 /stage：只负责音频、字幕和形象；管理页不能同时播音。
+管理端 /admin：业务配置、本浏览器启动选项、打开舞台、停止互动、连接状态与诊断；不创建 AudioContext。
+播放端 /stage：一键开始/停止互动、接入或恢复同一会话、音频、字幕和形象。页面分别控制同一个后端会话，只有有效租约的播放端能发声。
 
 ## 模块
 
@@ -23,7 +23,7 @@ CollectorPort → EventIngress → 事件校验/去重 → 分类有界队列 �
 
 现有：GET /api/v1/bootstrap，GET /api/v1/config，PUT /api/v1/config，GET /actuator/health。
 会话与播放接口：
-- POST /api/v1/sessions：创建会话；显式 mode=MOCK / conversationMode=MOCK；DOUYIN 当前返回 422。
+- POST /api/v1/sessions：显式选择 mode=MOCK/DOUYIN、conversationMode=MOCK/DEEPSEEK、speechMode=LOCAL_TEST_TONE/ALIYUN_NLS；DOUYIN 从已保存配置取得网页房间号。能力开放不代表实际联网验证通过。
 - POST /api/v1/sessions/{sessionId}/stop：幂等停止。
 - GET /api/v1/runtime：会话、采集状态、队列深度、播放端、错误指标。
 - POST /api/v1/events/simulate：只允许 MOCK 会话，通过标准校验和调度器。
@@ -34,8 +34,8 @@ CollectorPort → EventIngress → 事件校验/去重 → 分类有界队列 �
 
 ## 配置策略
 
-底层启动配置在 YAML/环境变量；业务配置在 SQLite，乐观版本锁。当前保存为完整 settings 对象，字段校验通过后原子更新；不可只改内存不落库。
-未来引擎每个任务捕获 ConfigSnapshot，不允许运行中改变已经提交的任务参数。提示词/限频/音色下一任务生效；房间切换需新会话；模型凭据/连接需先验证、再替换客户端。API 返回保存版本与运行版本，二者不等同。
+底层启动配置在 YAML/环境变量；业务配置在 SQLite，乐观版本锁。当前保存为完整 settings 对象，字段校验通过后原子更新；不可只改内存不落库。三项启动选项由前端仅存入同源 localStorage 的版本化白名单对象，不属于服务器配置，也不会自动启动。
+引擎每个任务捕获 ConfigSnapshot，不改变已经提交的任务参数。房间和供应商选择在会话启动时确定，房间切换需新会话；凭据更改需要重启后端。API 返回保存版本与最近任务使用版本，二者不等同。DOUYIN runtime.roomId 为解析后绑定的内部号，与配置网页号不同。
 
 ## 调度初始值
 
@@ -45,7 +45,7 @@ CollectorPort → EventIngress → 事件校验/去重 → 分类有界队列 �
 ## 生命周期与失败
 
 应用启动和直播会话启动分离。会话状态 STOPPED → STARTING → RUNNING → STOPPING → STOPPED；异常可进入 FAILED。直播关播只结束会话，不退出 Spring Boot。
-停止顺序：关入口、停采集与重连、取消模型与合成、取消待播任务并通知播放端、释放会话资源。旧 sessionId 的音频及回执忽略。
+停止先关闭入口并取消模型/合成/播放，再停止采集并有界等待资源退出；旧采集 Handle 未释放时阻止再次启动。旧 sessionId 的音频及回执忽略。播放器断线独立于主会话，撤销旧播放代次后可手动恢复同会话；无 ready 播放端不发起新的模型/TTS工作。普通标签隐藏不主动断开，但冻结、租约过期、音频中断仍清理播放端。
 模型需要整体截止时间（含 SSE keep-alive）；TTS 连接/读取/整体截止时间；有限重试、冷却与备用端。播放断线不得无限积压；自动回放必须防重复。实际阈值需故障注入测试。
 
 ## 迁移边界

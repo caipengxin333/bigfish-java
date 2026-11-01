@@ -92,9 +92,10 @@ export class StageController {
   checkActivity() {
     this.tick()
     if (this.validLease() && this.view.ready && this.audio.isEnabled && !this.audio.isEnabled()) {
-      this.unlocked = false; this.view.ready = false
       if (this.current) this.finish('FAILED', 'AUDIO_INTERRUPTED')
-      else this.note('AUDIO_INTERRUPTED')
+      // Protocol v1 has no NOT_READY message. Closing the transport revokes the
+      // server's ready lease too, so it stops scheduling unheard model/TTS work.
+      this.disconnect('AUDIO_INTERRUPTED')
     }
   }
   private validLease() { return this.view.connection === 'leased' && this.leaseGeneration !== null && this.now() < this.view.leaseExpiresAt }

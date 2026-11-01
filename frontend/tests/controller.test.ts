@@ -8,6 +8,7 @@ class FakeAudio implements AudioPort {
   starts = 0; stops = 0; enabled = false
   callbacks: Parameters<AudioPort['play']>[1] | null = null
   async enable() { this.enabled = true }
+  isEnabled() { return this.enabled }
   play(_task: unknown, callbacks: Parameters<AudioPort['play']>[1]) { this.starts++; this.callbacks = callbacks }
   stop() { this.stops++ }
   dispose() {}
@@ -46,6 +47,24 @@ test('no running session closes the handshake immediately with an actionable hin
   assert.equal(s.wire.closed, true)
   await s.controller.enable(); assert.equal(s.audio.enabled, false)
 })
+for (const playing of [false, true]) {
+  test(`suspended audio closes the ready transport and requires recovery (playing=${playing})`, async () => {
+    const s = setup(); s.lease(); await s.controller.enable()
+    if (playing) { s.receive('PLAY_TASK', s.task()); s.audio.callbacks!.started() }
+    const late = s.audio.callbacks
+    s.audio.enabled = false
+    s.controller.checkActivity()
+    assert.equal(s.wire.closed, true)
+    assert.equal(s.controller.view.connection, 'closed')
+    assert.equal(s.controller.view.ready, false)
+    assert.equal(s.controller.view.playing, false)
+    assert.equal(s.controller.view.history[0].code, 'AUDIO_INTERRUPTED')
+    const sent = s.wire.sent.length
+    late?.ended(); s.advance(5000)
+    assert.equal(s.wire.sent.length, sent, 'no late completion or renewal on a suspended player')
+    assert.deepEqual(s.ack().map(x => x.state), playing ? ['STARTED', 'FAILED'] : [])
+  })
+}
 test('STARTED and COMPLETED only follow actual audio callbacks; subtitles and volume stop with audio', async () => {
   const s = setup(); s.lease(); await s.controller.enable(); s.receive('PLAY_TASK', s.task())
   assert.equal(s.audio.starts, 1); assert.equal(s.ack().length, 0); assert.equal(s.controller.view.subtitle, '')

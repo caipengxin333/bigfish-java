@@ -3,7 +3,7 @@
   "info": {
     "title": "BigFish Integrated API",
     "version": "1.0.0",
-    "description": "配置、MOCK 会话、模拟采集回放、DeepSeek/阿里云 NLS、Token 状态、有限运行诊断及播放接口；真实抖音接收待验收，主会话仍禁用。"
+    "description": "配置、显式 MOCK/DOUYIN 主会话、DeepSeek/阿里云 NLS、Token 状态、有限运行诊断及播放接口；抖音启动能力已开放，真实接收仍待验收。"
   },
   "servers": [
     {
@@ -125,7 +125,7 @@
         "operationId": "startSession",
         "responses": {
           "201": {
-            "description": "成功",
+            "description": "会话已创建；采集异步连接，播放器需完成租约与 READY。",
             "content": {
               "application/json": {
                 "schema": {
@@ -145,7 +145,7 @@
             }
           },
           "409": {
-            "description": "校验失败或操作不可用",
+            "description": "SESSION_ACTIVE：已有活动会话；COLLECTOR_STOPPING：上一采集器资源尚未释放。",
             "content": {
               "application/json": {
                 "schema": {
@@ -155,7 +155,7 @@
             }
           },
           "422": {
-            "description": "校验失败或操作不可用",
+            "description": "DOUYIN_ROOM_REQUIRED / DOUYIN_UNSUPPORTED_ROOM_URL，或云服务开关/配置/音色不可用；响应给出固定安全代码。",
             "content": {
               "application/json": {
                 "schema": {
@@ -165,7 +165,7 @@
             }
           },
           "503": {
-            "description": "校验失败或操作不可用",
+            "description": "PROVIDER_UNAVAILABLE / COLLECTOR_START_FAILED：初始化失败，处理链已关闭并清理。",
             "content": {
               "application/json": {
                 "schema": {
@@ -184,7 +184,8 @@
               }
             }
           }
-        }
+        },
+        "description": "显式创建唯一活动会话；重复启动不会重启已有会话。查询和配置保存不自动创建，启动结果不明时先查询 runtime，不盲目重复 POST。"
       }
     },
     "/api/v1/sessions/{sessionId}/stop": {
@@ -240,7 +241,7 @@
             }
           },
           "409": {
-            "description": "校验失败或操作不可用",
+            "description": "SESSION_MISMATCH / PLAYER_NOT_READY / MOCK_ONLY / COLLECTOR_STOPPING；仅当前就绪的 MOCK 会话允许回放。",
             "content": {
               "application/json": {
                 "schema": {
@@ -334,7 +335,8 @@
               }
             }
           }
-        }
+        },
+        "description": "仅 MOCK 会话可接受模拟事件；DOUYIN 返回 409 MOCK_ONLY，不能依赖前端禁用按钮隔离。"
       }
     },
     "/api/v1/audio/{assetId}": {
@@ -649,10 +651,10 @@
               "ALIYUN_NLS"
             ],
             "default": "LOCAL_TEST_TONE",
-            "description": "可省略以兼容第一轮客户端；显式 null 非法。真实 NLS 要求云调用开关、AppKey、Token 和支持音色。"
+            "description": "可省略，默认 LOCAL_TEST_TONE；显式 null 非法。NLS 要求调用开关、支持音色以及 STATIC 的 AppKey/Token 或 RAM 的 AppKey/AccessKey。"
           }
         },
-        "description": "必须显式选择。当前 DOUYIN 返回 422；DEEPSEEK 需要服务端环境凭据及 BIGFISH_ALLOW_PAID=true，无静默回退。"
+        "description": "必须显式选择 mode/conversationMode；DOUYIN 使用后端已保存数字网页号并异步连接，失败不回退 MOCK。云回复/语音仍需环境凭据及 BIGFISH_ALLOW_PAID=true。创建成功不代表采集连接或播放端就绪。"
       },
       "QueueStatus": {
         "type": "object",
@@ -711,7 +713,8 @@
           "mode": {
             "type": "string",
             "enum": [
-              "MOCK"
+              "MOCK",
+              "DOUYIN"
             ]
           },
           "conversationMode": {
@@ -729,7 +732,8 @@
             ]
           },
           "roomId": {
-            "type": "string"
+            "type": "string",
+            "description": "MOCK 为 mock-room；DOUYIN 为可信解析绑定的内部房间号，解析前为空，不等于 settings.roomId 网页号。"
           },
           "savedConfigVersion": {
             "type": "integer",
@@ -797,7 +801,8 @@
                 "format": "int64",
                 "minimum": 0
               }
-            }
+            },
+            "description": "当前播放租约状态。connected=false 时旧传输仍可能在关闭且原租约未到期，新端暂被拒绝；不代表立即可以抢占。"
           },
           "collector": {
             "type": "object",
@@ -815,7 +820,8 @@
               "mode": {
                 "type": "string",
                 "enum": [
-                  "MOCK"
+                  "MOCK",
+                  "DOUYIN"
                 ]
               },
               "state": {
@@ -873,7 +879,7 @@
             "description": "ISO 时间；无错误时为空字符串。"
           }
         },
-        "description": "collector 计数属于最近一次回放，dropped/failures 为进程累计；appliedConfigVersion 是最近接收任务使用的版本，队列内任务保留各自快照。READY/bootstrap 不代表真实抖音或人声服务可用。"
+        "description": "collector 计数属于当前/最近一次采集 Run；received/emitted 不代表逐类消息或播放成功。dropped/failures 为进程累计；appliedConfigVersion 是启动或最近任务使用的版本，已排队任务保留各自快照。RUNNING 不等于采集连接、真实接收或播放器 ready。"
       },
       "EventResult": {
         "type": "object",
@@ -977,7 +983,7 @@
             "type": "string"
           }
         },
-        "description": "configured 只表示环境变量存在；enabled 表示同时满足显式调用开关，不代表真实请求通过。UNVERIFIED 不等于认证成功。"
+        "description": "云供应商 configured 表示环境凭据齐备，enabled 还要求付费调用开关。DOUYIN configured/enabled 表示游客工厂已接线、允许显式启动，不需要网页填写凭据。UNVERIFIED 表示尚无真实接收证据，LIVE_EVENT_OBSERVED 仅说明当前会话接受过有效事件，不证明所有事件类型或声音播放通过。"
       },
       "ProvidersView": {
         "type": "object",
