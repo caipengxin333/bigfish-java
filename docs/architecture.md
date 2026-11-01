@@ -1,6 +1,6 @@
 # 架构与第一阶段范围
 
-状态：已集成 MOCK/DOUYIN 主会话、DeepSeek/NLS 与 Vue 一键互动；真实抖音解析最近返回 PAGE_STRUCTURE_CHANGED，真实消息接收未验收。开发分离、交付可合并；单 Java 进程，不引入微服务、Redis、消息中间件或配置中心。
+状态：已集成 MOCK/DOUYIN 主会话、DeepSeek/NLS 与 Vue 一键互动；指定抖音房间的游客解析和 WebSocket 握手已通过，真实消息解码仍有 MALFORMED，评论/礼物接收未验收。开发分离、交付可合并；单 Java 进程，不引入微服务、Redis、消息中间件或配置中心。
 
 ## 数据通路
 

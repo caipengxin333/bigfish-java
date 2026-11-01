@@ -2,7 +2,7 @@
 
 核查日期：2026-11-01。已内置 `NativeDouyinSigner` 与 `WebDouyinConnectionProvider.guest()`，并接入 `SessionService`。管理页保存数字网页房间号，明确选择 DOUYIN 后在舞台开始互动；自动获取游客 Cookie、访客 ID 与内部房间号。`bootstrap.capabilities.douyinCollector` 和 `providers.douyin.enabled` 表示启动能力已开放，不表示真实接收已验收。
 
-**最近一次真实 guest resolve 发出 2 次 HTTP，返回 PAGE_STRUCTURE_CHANGED；没有发起 WSS，真实评论/礼物均为 0。** 不能据此断言房间下播或需要登录。公共签名向量和本地链路通过，线上解析/签名接受与真实接收仍需后续验证。详见 [第四轮交接](../handoffs/phase4-douyin-session.md)。主会话失败时显示固定错误，不回退为 MOCK。
+**最新指定房间的 guest resolve 已返回 LIVE；随后 60 秒接收测试握手成功，但出现 92 次 MALFORMED，有效评论/礼物均为 0，真实消息接收仍未通过。** 采集窗口在房间 `440132407257` 上完成上述验证：resolve 发出 2 次 HTTP；receive 另发出 2 次 HTTP、1 次签名和 1 次 WSS 握手，停止后资源归零。详情见 [采集最新交接](../handoffs/collector.md) 与 [主窗口集成记录](../handoffs/phase7-collector-integration.md)。此结果不能推断房间现在仍在播，也不能把解码失败解释为没有观众发言。原 `PAGE_STRUCTURE_CHANGED` 的页面获取、空初始 store 与深度问题已修复；主会话不回退为 MOCK。
 
 保存、状态查询与应用启动不连接抖音，只有显式启动 DOUYIN 会话才连接。公开配置字段目前仅接收数字网页号；内部解析器支持规范链接不意味着配置接口接受任意 URL。`runtime.roomId` 为解析后内部号，解析前为空，不可与已保存网页号比较后认定串房。运行中配置变化不切换既有采集房间。
 
@@ -44,14 +44,14 @@
 
 1. 不带 Cookie 请求固定抖音直播首页，读取响应 `Set-Cookie` 中的 `ttwid`。
 2. 携带该 `ttwid` 和同一程序 UA 请求当前房间页面。房间响应更新 `ttwid` 时采用新值，其余 Cookie 不转发给 WSS。
-3. 解析已支持的 JSON/RENDER_DATA/pace 页面数据。内部房间号来自 `roomStore.roomInfo`；访客标识只取明确的 `user_unique_id` 字段，不拿主播 UID、房间号或随机数替代。缺失为 `GUEST_ID_MISSING`，冲突/非法字段为 `PAGE_STRUCTURE_CHANGED`。已关播/内部 roomId 改变时不再要求访客 ID，也不签名或开第二条连接。
+3. 解析已支持的 JSON/RENDER_DATA/pace 页面数据。仅跳过流式初始化中确切为空对象的 `roomStore.roomInfo={}`，仍必须找到完整有效房间；残缺、null、数组或冲突数据继续失败。内部房间号来自 `roomStore.roomInfo`；访客标识只取明确的 `user_unique_id` 字段，不拿主播 UID、房间号或随机数替代。访客遍历深度与 JSON 预算统一为 64，保留 2 MiB 页面限制。缺失为 `GUEST_ID_MISSING`，冲突/非法字段为 `PAGE_STRUCTURE_CHANGED`。已关播/内部 roomId 改变时不再要求访客 ID，也不签名或开第二条连接。
 4. 由现有原生 signer 构造当前时间、房间、访客和 nonce 对应的短期目标。Cookie/访客值只存在于本次连接内存；重连重新走上述流程。
 
-程序内置 UA 是 `Mozilla/5.0 (compatible; BigFishCollector/0.1; Java/21)`，明确标识该 Java 客户端，整个尝试保持一致；不是从用户浏览器读取，也不轮换 UA/代理来试探访问限制。该 UA、游客页面字段和初始 WSS 参数是否被当前线上接受仍需实测。
+程序使用固定页面兼容 UA：`Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 BigFishCollector/0.1`。旧通用 Java UA 的房间请求在本轮实测返回 HTTP 200 空正文；新字符串保留自身标识，首页、房间、签名与 WSS 使用同一个值，不读取用户浏览器或轮换 UA/代理，也不需要安装 Chrome。指定房间解析与握手已验证，不代表所有房间或后续平台版本均兼容。
 
 Cookie 只接受固定平台首页/房间响应中的 `ttwid`，限制值长度、总头部大小、Domain/Path，拒绝冲突、非法或已删除/过期值；不读取登录 Cookie、不生成 msToken/nonce 挑战值、不执行页面脚本。响应中其他 Cookie 不加入请求。`Max-Age`/`Expires` 与本地最长 5 分钟预算共同限制连接材料；会话 Cookie 未给期限时使用本地预算。这不是平台保证的有效期，也不代表长连接必须每 5 分钟重建。无共享 Cookie jar、磁盘缓存或凭据持久化。
 
-首页/房间若要求登录、验证、地区权限或限流，立即给出固定诊断，停止自动重试。首页没下发 `ttwid`、页面没给访客字段时也明确失败；不猜测或复用旧项目硬编码参数。我们只验证了本地人工页面，不保证所有房间允许游客访问。
+首页/房间若要求登录、验证、地区权限或限流，立即给出固定诊断，停止自动重试。首页没下发 `ttwid`、页面没给访客字段时也明确失败；不猜测或复用旧项目硬编码参数。已验证人工页面与上述指定真实房间，不保证所有房间允许游客访问。空 HTTP 200 响应仍归 PAGE_STRUCTURE_CHANGED，不能仅凭空响应认定下播或登录要求。
 
 ## 独立 probe 开关与可选外部凭据
 
@@ -85,7 +85,7 @@ Cookie 只接受固定平台首页/房间响应中的 `ttwid`，限制值长度�
 
 `NativeDouyinSigner` 从本次 roomId、浏览器访客 ID、UA 与当前时间构造 WSS 查询串，13 个字段按固定顺序参与签名；SDK 版本为 `1.0.15`。签名值中的 `+` 等字符按 URL 编码，避免被解码为空格。返回的 30 秒有效期是本地新鲜度预算，并非平台签发的过期时间。重连重新取页面、凭据、nonce 和时间并签名，不重复使用缓存 URL。整个实现仅用已有 Java 21 标准库，无新增 POM 依赖、Node/浏览器/Go 辅助服务。
 
-**当前连接引导的实测缺口**：上游会尝试 IM fetch 获取服务端 cursor/push server，也保留了历史 cursor/wrds_v 回退。本实现未实现 HTTP A-Bogus/IM fetch，不复制历史 cursor/wrds_v；初次 WSS 使用空 cursor、由当前 roomId/访客/时间生成的 internal_ext，以及已允许的 `webcast100-ws-web-lf.douyin.com` 主机。没有凭空填写屏幕尺寸或浏览器平台。平台是否接受这种初始请求、该边缘节点及参数组合，必须用当前合法会话实测。若拒绝，不自动轮换主机、绕过挑战或降级成旧签名；先按固定错误停止并重新评估 bootstrap。**原生算法兼容测试通过不等于线上已可用。**
+**当前连接引导与实测边界**：上游会尝试 IM fetch 获取服务端 cursor/push server，也保留了历史 cursor/wrds_v 回退。本实现未实现 HTTP A-Bogus/IM fetch，不复制历史 cursor/wrds_v；初次 WSS 使用空 cursor、由当前 roomId/访客/时间生成的 internal_ext，以及已允许的 `webcast100-ws-web-lf.douyin.com` 主机。没有凭空填写屏幕尺寸或浏览器平台。指定房间已接受一次初始握手，但后续入站数据报 MALFORMED，尚不能判定具体封装、压缩或字段差异。若握手被拒绝，不自动轮换主机、绕过挑战或降级成旧签名；先按固定错误停止并重新评估 bootstrap。**握手通过不等于消息解码或实际业务接收通过。**
 
 `DouyinSigners.load()` 通过已注册的 `META-INF/services/cn.bigfish.collector.DouyinSigner` 加载唯一实现，默认就是 `NativeDouyinSigner`，无需外置 signer JAR。ServiceLoader 无实现、多个候选、坏类名或构造失败均转为固定错误；多候选时不执行构造函数。如需替换，集成必须显式注入选定实现或调整发行物中的唯一注册，不能简单叠加第二个 SPI JAR。
 
@@ -127,6 +127,7 @@ Cookie 只接受固定平台首页/房间响应中的 `ttwid`，限制值长度�
 | `SIGNER_UNAVAILABLE / SIGNER_CONFIGURATION_INVALID / SIGNER_FAILED / SIGNER_TIMEOUT` | 缺少实现或显式审查开关、SPI 配置错误、执行失败或超过 10 秒；FAILED |
 | `SIGNATURE_INVALID / SIGNATURE_EXPIRED` | nonce/room/访客/目标不匹配、空签名、重复参数或时间不合格；FAILED |
 | `HANDSHAKE_REJECTED` | WSS 未升级成功；固定码，不输出响应。可能是鉴权、签名或平台变化，不能单凭此码断言哪项失效 |
+| `MALFORMED` | 入站数据未被现有解码器接受；可能仍显示 CONNECTED。不能据此断言没有评论/礼物，需以最小脱敏结构定位解码差异 |
 | `PROBE_DISABLED / ROOM_REQUIRED / PROBE_CONFIGURATION_INVALID / ATTEMPT_LIMIT` | 修正独立验收准备项；不反复自动运行 |
 
 未知验证码/地区页面可能归为 `PAGE_STRUCTURE_CHANGED`；诊断不能冒充服务端明确结论。异常消息和 cause 不保存在本轮 `DouyinFailure` 中。
