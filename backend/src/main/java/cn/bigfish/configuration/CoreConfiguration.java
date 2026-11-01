@@ -16,6 +16,7 @@ import org.springframework.web.socket.config.annotation.*;
 @Configuration
 @EnableScheduling
 public class CoreConfiguration {
+    @Bean SessionCollectors sessionCollectors() { return new SessionCollectors(); }
     @Bean Clock runtimeClock() { return Clock.systemUTC(); }
     @Bean AudioAssets audioAssets(@Value("${bigfish.data-dir}") String root, Clock clock) throws Exception {
         return new AudioAssets(Path.of(root,"audio"),clock);
