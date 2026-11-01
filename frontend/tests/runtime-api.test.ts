@@ -29,7 +29,7 @@ test('real providers are explicit and independent of mock event collection', asy
     assert.deepEqual(JSON.parse(init.body), { mode: 'MOCK', conversationMode: 'DEEPSEEK', speechMode: 'ALIYUN_NLS' })
     return Response.json({ ...runtime, conversationMode: 'DEEPSEEK', speechMode: 'ALIYUN_NLS' })
   }))
-  assert.equal((await api.start('DEEPSEEK', 'ALIYUN_NLS')).speechMode, 'ALIYUN_NLS')
+  assert.equal((await api.start({ mode: 'MOCK', conversationMode: 'DEEPSEEK', speechMode: 'ALIYUN_NLS' })).speechMode, 'ALIYUN_NLS')
 })
 test('provider status and explicit catalog check validate different contracts', async () => {
   const p = { configured: false, enabled: false, state: 'MISSING', reason: 'MISSING_CREDENTIALS' }
@@ -80,4 +80,33 @@ test('timed out start is never retried automatically', async () => {
   const api = createRuntimeApi(fetcher((_url, init) => { calls++; return new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(new Error()))) }), 5)
   await assert.rejects(api.start(), e => e instanceof RequestError && e.kind === 'timeout')
   assert.equal(calls, 1)
+})
+
+
+test('DOUYIN uses the agreed three fields, and validates collection lifecycle without pretending success', async () => {
+  const api = createRuntimeApi(fetcher(async (_url, init) => {
+    assert.deepEqual(JSON.parse(init.body), { mode: 'DOUYIN', conversationMode: 'MOCK', speechMode: 'LOCAL_TEST_TONE' })
+    return Response.json({ ...runtime, mode: 'DOUYIN', collector: { ...runtime.collector, mode: 'DOUYIN', state: 'CONNECTING' } })
+  }))
+  assert.equal((await api.start({ mode: 'DOUYIN', conversationMode: 'MOCK', speechMode: 'LOCAL_TEST_TONE' })).collector.state, 'CONNECTING')
+  for (const state of ['CONNECTING', 'CONNECTED', 'RECONNECTING', 'ENDED', 'FAILED', 'STOPPED']) {
+    assert.equal(isRuntime({ ...runtime, mode: 'DOUYIN', collector: { ...runtime.collector, mode: 'DOUYIN', state } }), true)
+  }
+  assert.equal(isRuntime({ ...runtime, mode: 'OTHER' }), false)
+  assert.equal(isRuntime({ ...runtime, collector: { ...runtime.collector, mode: 'OTHER' } }), false)
+})
+test('caller cancellation aborts read requests and a denied DOUYIN start never retries MOCK', async () => {
+  const abort = new AbortController()
+  const pending = createRuntimeApi(fetcher((_url, init) => new Promise((_, reject) => {
+    init.signal.addEventListener('abort', () => reject(new Error('cancelled')))
+  }))).status(abort.signal)
+  abort.abort()
+  await assert.rejects(pending, e => e instanceof RequestError)
+  const modes: string[] = []
+  const api = createRuntimeApi(fetcher(async (_url, init) => {
+    modes.push(JSON.parse(init.body).mode)
+    return Response.json({ code: 'DOUYIN_UNAVAILABLE', message: 'private upstream response' }, { status: 422 })
+  }))
+  await assert.rejects(api.start({ mode: 'DOUYIN', conversationMode: 'MOCK', speechMode: 'LOCAL_TEST_TONE' }), /后端尚未开放抖音/)
+  assert.deepEqual(modes, ['DOUYIN'])
 })

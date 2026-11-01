@@ -26,7 +26,7 @@ export function taskView(p: RecordValue, origin: string) {
 }
 export type StageTask = NonNullable<ReturnType<typeof taskView>>
 export const reasons: Record<string, string> = {
-  NO_SESSION: '尚未启动会话。请先点击启动模拟会话，再连接播放端。',
+  NO_SESSION: '后端互动会话未运行，请点击开始互动。',
   COMPLETED: '播放已结束，等待下一任务。',
   SESSION_CACHE_FULL: '本页已记录 128 个停止会话，停止建立新连接；请刷新页面并重新握手。',
   CONNECT_TIMEOUT: '连接或租约握手超时，请检查服务后重连。', DISCONNECTED: '连接断开，已停止音频并清空字幕。',
@@ -38,5 +38,6 @@ export const reasons: Record<string, string> = {
   AUDIO_TOO_LARGE: '音频超过本地安全上限。', AUDIO_TOO_LONG: '音频时长超过 120 秒上限。', PLAYBACK_BLOCKED: '浏览器阻止播放，请点击启用声音。',
   AUDIO_INTERRUPTED: '音频上下文已中断，已停止播放，请重新启用声音。', PLAYBACK_TIMEOUT: '播放超时，已停止音频。',
   CACHE_FULL: '本页去重缓存已满，停止接收任务，请稍后重连。', MOCK_UNAVAILABLE: '浏览器不支持本地独占租约，mock 保持静音。',
-  PAGE_HIDDEN: '页面进入后台，已静音断开；返回后请重新连接。', USER_DISCONNECTED: '已断开播放端。',
+  SESSION_CHANGED: '后端会话已变化，本页保持静音；请核对后重新开始互动。',
+  PAGE_FROZEN: '页面已被浏览器冻结，播放已断开；恢复后请点击恢复播放。', USER_DISCONNECTED: '已断开播放端。',
 }

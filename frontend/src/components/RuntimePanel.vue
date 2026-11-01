@@ -17,7 +17,7 @@ onBeforeUnmount(() => channel?.close())
   <section class="status-grid" aria-label="运行状态">
     <article><span>会话与采集</span><strong>{{ mode === 'mock' ? (running ? '演示运行中' : '演示未启动') : (bootstrap?.sessionState ?? '未确认') }}</strong><p>{{ mode === 'mock' ? '仅本页模拟状态，未连接抖音' : '采集状态不可用，等待 runtime 正式接口' }}</p></article>
     <article><span>保存 / 生效</span><strong>保存 {{ savedVersion ? `v${savedVersion}` : '未读取' }}</strong><p>{{ mode === 'mock' ? `模拟生效：${activeVersion ? `v${activeVersion}` : '未应用'}（启动演示时捕获）` : '运行生效版本：不可用，后端尚未提供' }}</p></article>
-    <article><span>播放端</span><strong>{{ mode === 'mock' ? '独立舞台演练' : '状态不可用' }}</strong><p>舞台获得租约并点击启用声音后才能播出；本页不创建播放器。</p></article>
+    <article><span>播放端</span><strong>{{ mode === 'mock' ? '独立舞台演练' : '状态不可用' }}</strong><p>舞台点击开始互动后申请租约和声音授权；本页不创建播放器。</p></article>
   </section>
   <section class="panel">
     <div class="form-title"><div><h2>队列与失败原因</h2><p class="muted">{{ mode === 'mock' ? '以下是界面演练数据，不是后端指标。' : '尚无运行数据，不能将未知显示为零或成功。' }}</p></div><div class="toolbar"><button :disabled="mode !== 'mock' || running || !savedVersion" @click="start">{{ mode === 'mock' ? '启动演示' : '启动会话（待接入）' }}</button><button class="secondary" :disabled="mode !== 'mock'" @click="stop">{{ mode === 'mock' ? '停止演示舞台' : '停止会话（待接入）' }}</button></div></div>

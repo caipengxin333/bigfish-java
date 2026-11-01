@@ -2,7 +2,8 @@ import type { Bootstrap, ConfigSnapshot, Settings } from './contracts'
 
 export class RequestError extends Error {
   readonly kind: 'conflict' | 'timeout' | 'network' | 'invalid' | 'http'
-  constructor(kind: RequestError['kind'], message: string) { super(message); this.kind = kind }
+  readonly code: string
+  constructor(kind: RequestError['kind'], message: string, code = '') { super(message); this.kind = kind; this.code = code }
 }
 const integer = (v: unknown, min: number, max: number) => Number.isInteger(v) && Number(v) >= min && Number(v) <= max
 const string = (v: unknown, min: number, max: number) => typeof v === 'string' && v.length >= min && v.length <= max
@@ -29,9 +30,12 @@ export function copySettings(s: Settings): Settings {
     priorities: { gift: s.priorities.gift, comment: s.priorities.comment, follow: s.priorities.follow, entrance: s.priorities.entrance } }
 }
 export function createApi(fetcher: typeof fetch = fetch, timeoutMs = 8000) {
-  async function request<T>(path: string, validate: (v: unknown) => v is T, init?: RequestInit): Promise<T> {
+  async function request<T>(path: string, validate: (v: unknown) => v is T, init?: RequestInit, signal?: AbortSignal): Promise<T> {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
+    const cancel = () => controller.abort()
+    signal?.addEventListener('abort', cancel, { once: true })
+    if (signal?.aborted) cancel()
     try {
       const response = await fetcher(`/api/v1${path}`, { ...init, signal: controller.signal, headers: { 'Content-Type': 'application/json' } })
       if (response.status === 409) throw new RequestError('conflict', '保存冲突：另一页面已更新配置。当前草稿已保留，请先读取最新版本再核对。')
@@ -44,10 +48,11 @@ export function createApi(fetcher: typeof fetch = fetch, timeoutMs = 8000) {
       if (controller.signal.aborted) throw new RequestError('timeout', '请求超时，结果尚未确认。草稿已保留，请读取最新版本后核对。')
       if (error instanceof SyntaxError) throw new RequestError('invalid', '服务未返回有效 JSON，请检查接口与代理。')
       throw new RequestError('network', '无法连接服务，请检查后端和网络后重试。')
-    } finally { clearTimeout(timer) }
+    } finally { clearTimeout(timer); signal?.removeEventListener('abort', cancel) }
   }
   return {
-    bootstrap: () => request('/bootstrap', isBootstrap), config: () => request('/config', isSnapshot),
+    bootstrap: (signal?: AbortSignal) => request('/bootstrap', isBootstrap, undefined, signal),
+    config: (signal?: AbortSignal) => request('/config', isSnapshot, undefined, signal),
     save: (expectedVersion: number, settings: Settings) => request('/config', isSnapshot, { method: 'PUT', body: JSON.stringify({ expectedVersion, settings: copySettings(settings) }) }),
   }
 }

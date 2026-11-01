@@ -147,3 +147,27 @@ test('stale transport callbacks cannot interrupt a replacement connection', asyn
   stale.close(); stale.message('malformed old frame')
   assert.equal(s.controller.view.connection, 'leased'); assert.equal(s.controller.view.ready, true)
 })
+
+
+test('pre-unlock does not send READY until expected lease; late unlock after stop cannot arm a replacement', async () => {
+  const s = setup(); s.controller.disconnect()
+  let finish!: () => void
+  s.audio.enable = () => new Promise(resolve => { finish = resolve })
+  const sound = s.controller.unlock()
+  s.controller.connect(s.wire, 'session-a'); s.lease()
+  assert.equal(s.wire.sent.some(x => x.type === 'PLAYER_READY'), false)
+  s.controller.disconnect()
+  const replacement = new FakeTransport(); s.controller.connect(replacement, 'session-a'); s.lease(4)
+  finish(); await sound
+  assert.equal(s.controller.view.ready, false)
+  assert.equal(replacement.sent.some(x => x.type === 'PLAYER_READY'), false)
+  s.controller.dispose()
+})
+test('an unlock completing after lease expiry cannot declare READY', async () => {
+  const s = setup(); s.lease()
+  let finish!: () => void
+  s.audio.enable = () => new Promise(resolve => { finish = resolve })
+  const sound = s.controller.enable(); s.advance(16000); finish(); await sound
+  assert.equal(s.controller.view.ready, false); assert.equal(s.wire.sent.some(x => x.type === 'PLAYER_READY'), false)
+  s.controller.dispose()
+})
