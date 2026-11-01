@@ -512,3 +512,11 @@ meter {
     padding:0 12px
   }
 }
+
+/* Session identities and capability explanations must fit narrow stage controls. */
+.session-identity,.panel>p { overflow-wrap:anywhere; }
+.toolbar label { min-width:0; }
+@media(max-width:760px) {
+  .toolbar label { flex:1 1 180px; }
+  .stage-status { flex-wrap:wrap; }
+}

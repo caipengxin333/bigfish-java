@@ -12,6 +12,9 @@ export interface Bootstrap {
 }
 
 export interface QueueStatus { depth: number; capacity: number }
+export type CollectionMode = 'MOCK' | 'DOUYIN'
+export type CollectorState = 'STOPPED' | 'CONNECTING' | 'CONNECTED' | 'RECONNECTING' | 'ENDED' | 'FAILED'
+export interface SessionSelection { mode: CollectionMode; conversationMode: ConversationMode; speechMode: SpeechMode }
 export type ConversationMode = 'MOCK' | 'DEEPSEEK'
 export type SpeechMode = 'LOCAL_TEST_TONE' | 'ALIYUN_NLS'
 export interface ProviderState { configured: boolean; enabled: boolean; state: string; reason: string }
@@ -43,11 +46,11 @@ export interface ModelCheck {
 }
 export interface RuntimeView {
   sessionId: string; state: 'STOPPED' | 'STARTING' | 'RUNNING' | 'STOPPING' | 'FAILED';
-  mode: 'MOCK'; conversationMode: ConversationMode; speechMode: SpeechMode; roomId: string;
+  mode: CollectionMode; conversationMode: ConversationMode; speechMode: SpeechMode; roomId: string;
   savedConfigVersion: number; appliedConfigVersion: number;
   queues: { comments: QueueStatus; templates: QueueStatus; synthesis: QueueStatus; playback: QueueStatus; modelActive: boolean; speechActive: boolean };
   player: { connected: boolean; ready: boolean; playing: boolean; leaseGeneration: number };
-  collector: { mode: 'MOCK'; state: string; received: number; emitted: number; duplicates: number; rejected: number; lastError: string };
+  collector: { mode: CollectionMode; state: CollectorState; received: number; emitted: number; duplicates: number; rejected: number; lastError: string };
   dropped: number; failures: number; lastError: string; lastErrorAt: string;
 }
 export type EventResult = 'ACCEPTED' | 'DUPLICATE' | 'REJECTED_FULL' | 'REJECTED_SESSION' | 'INVALID'

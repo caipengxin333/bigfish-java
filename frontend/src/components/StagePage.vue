@@ -36,7 +36,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); controller.dispose(); d
   <main v-if="view" class="stage-page">
     <div class="heading"><div><p class="eyebrow">LIVE STAGE / 02</p><h1>声音到达，舞台才开口。</h1><p class="muted">独占播放 · 实时字幕 · 音量驱动</p></div><a class="button secondary" :href="pageUrl('stage', mode === 'real' ? 'mock' : 'real')">{{ mode === 'real' ? '选择 mock 演练' : '选择真实 WebSocket' }}</a></div>
     <section class="stage-canvas" aria-label="播放舞台">
-      <div class="stage-status"><span class="live-dot" :class="{ active: view.playing }"></span>{{ view.playing ? '正在播放' : states[view.connection] }}<span class="stage-mode">{{ mode.toUpperCase() }}</span></div>
+      <div class="stage-status"><span class="live-dot" :class="{ active: view.playing }"></span>{{ view.playing ? '正在播放' : states[view.connection] }}<span class="stage-mode">{{ mode === 'real' ? '后端播放连接' : '浏览器演示' }}</span></div>
       <component :is="Avatar" :mouth-level="view.level" :speaking="view.playing" :connected="connected" />
       <div class="subtitle" data-testid="subtitle" aria-live="polite">{{ view.subtitle || (view.ready ? '等待下一段声音' : '点击启用声音后，字幕将在实际播放时出现') }}</div>
       <div class="volume"><span>音量</span><meter min="0" max="1" :value="view.level" aria-label="实时音量"></meter><span>{{ Math.round(view.level * 100) }}%</span></div>

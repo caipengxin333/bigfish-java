@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>消息来源 · 本地夹具验收</title>
+<link rel="stylesheet" href="/src/style.css">
+<body class="shell">
+<p class="message warning">仅本地测试夹具：所有接口均返回假数据，无真实抖音、模型或语音调用。下方“真实后端接口”为被测组件文案。</p>
+<label>夹具采集状态<select id="state"><option>CONNECTING</option><option>CONNECTED</option><option>RECONNECTING</option><option>ENDED</option><option>FAILED</option></select></label>
+<div class="toolbar"><button id="disable">切换抖音可用性</button><button id="conflict">下次保存返回 409</button><button id="failure">切换读取失败</button></div>
+<div id="fixture"></div>
+<script type="module">
+import { bootstrap, snapshot, providers, runtime, diagnostics } from './session-fixtures.ts'
+const data = structuredClone({ bootstrap, snapshot, providers, runtime, diagnostics })
+let conflict = false, failure = false
+document.querySelector('#state').onchange = event => {
+  data.runtime.collector.state = event.target.value
+  data.runtime.collector.lastError = event.target.value === 'FAILED' ? 'CONNECTION_FAILED' : ''
+}
+document.querySelector('#disable').onclick = () => {
+  data.providers.douyin.enabled = !data.providers.douyin.enabled
+  data.bootstrap.capabilities.douyinCollector = data.providers.douyin.enabled
+}
+document.querySelector('#conflict').onclick = () => { conflict = true }
+document.querySelector('#failure').onclick = () => { failure = !failure }
+// No fallback to native fetch. Even unexpected routes fail locally.
+window.fetch = async (url, init = {}) => {
+  const path = String(url).replace('/api/v1', '')
+  const body = init.body ? JSON.parse(init.body) : undefined
+  if (failure && (init.method ?? 'GET') === 'GET') return Response.json({}, { status: 503 })
+  if (path === '/config' && init.method === 'PUT') {
+    if (conflict || body.expectedVersion !== data.snapshot.version) { conflict = false; return Response.json({}, { status: 409 }) }
+    data.snapshot = { ...data.snapshot, version: data.snapshot.version + 1, settings: body.settings }
+  }
+  if (path === '/sessions') {
+    if (body.mode === 'DOUYIN' && !data.providers.douyin.enabled) return Response.json({ code: 'DOUYIN_UNAVAILABLE' }, { status: 422 })
+    data.runtime = { ...data.runtime, ...body, sessionId: 'fixture-session', state: 'RUNNING', roomId: body.mode === 'MOCK' ? 'mock-room' : data.snapshot.settings.roomId,
+      collector: { ...data.runtime.collector, mode: body.mode, state: 'CONNECTING' } }
+  }
+  if (path.endsWith('/stop')) data.runtime = { ...data.runtime, state: 'STOPPED', collector: { ...data.runtime.collector, state: 'STOPPED' } }
+  const responses = { '/config': data.snapshot, '/bootstrap': data.bootstrap, '/providers': data.providers, '/runtime': data.runtime,
+    '/runtime/diagnostics': { ...data.diagnostics, sessionId: data.runtime.sessionId, state: data.runtime.state, waiting: [data.runtime.state === 'RUNNING' ? 'NO_MESSAGES' : 'STOPPED'] },
+    '/sessions': data.runtime, '/sessions/fixture-session/stop': data.runtime }
+  return Object.hasOwn(responses, path) ? Response.json(responses[path]) : Response.json({ code: 'FIXTURE_UNSUPPORTED' }, { status: 422 })
+}
+const { createApp } = await import('vue')
+const component = new URLSearchParams(location.search).has('compact')
+  ? (await import('../src/components/BackendRuntimePanel.vue')).default
+  : (await import('../src/components/AdminPage.vue')).default
+createApp(component, new URLSearchParams(location.search).has('compact') ? { compact: true } : {}).mount('#fixture')
+</script>
+</body></html>

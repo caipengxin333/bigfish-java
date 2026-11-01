@@ -12,6 +12,8 @@ const saved = ref<ConfigSnapshot | null>(null)
 const draft = ref<Settings | null>(null)
 const latest = ref<ConfigSnapshot | null>(null)
 const busy = ref(false), error = ref(''), notice = ref(''), needsReview = ref(false), fault = ref('none')
+const roomLocked = ref(true)
+const roomDirty = computed(() => !!draft.value && draft.value.roomId !== saved.value?.settings.roomId)
 const dirty = computed(() => !!draft.value && JSON.stringify(draft.value) !== JSON.stringify(saved.value?.settings))
 const priorities = ['gift', 'comment', 'follow', 'entrance'] as const
 const labels = { gift: '礼物感谢', comment: '评论回复', follow: '关注', entrance: '入场' }
@@ -37,6 +39,7 @@ function reconcile(keepDraft: boolean) {
 }
 async function save() {
   if (!draft.value || !saved.value || needsReview.value || latest.value) return
+  if (mode === 'real' && roomDirty.value && roomLocked.value) { error.value = '请先停止会话，再保存房间变更。'; return }
   busy.value = true; error.value = ''; notice.value = ''
   try {
     if (mode === 'mock' && fault.value !== 'none') throw new RequestError(fault.value === 'conflict' ? 'conflict' : 'timeout', fault.value === 'conflict' ? '模拟 409：保存冲突，草稿已保留。请读取最新版本。' : '模拟超时：保存结果未确认，草稿已保留。请读取最新版本。')
@@ -56,13 +59,14 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeLeave))
     <div class="toolbar"><a class="button secondary" :href="pageUrl('admin', mode === 'real' ? 'mock' : 'real')">{{ mode === 'real' ? '切换到本地 mock' : '切换到真实接口' }}</a><button class="secondary" :disabled="busy" @click="load">{{ busy ? '处理中…' : '读取最新版本' }}</button><span class="muted">{{ bootstrap ? (mode === 'mock' ? '本地演示可用' : `后端响应：${bootstrap.mode}`) : '运行信息未确认' }}</span></div>
     <div v-if="error" class="message error" role="alert">{{ error }}</div><div v-if="notice" class="message" role="status">{{ notice }}</div>
     <div v-if="latest" class="message warning"><p>本地基准 v{{ saved?.version }} → 最新保存 v{{ latest.version }}。保留草稿将以整份草稿覆盖最新配置，请先核对。</p><details><summary>查看最新保存内容</summary><pre>{{ JSON.stringify(copySettings(latest.settings), null, 2) }}</pre></details><div class="toolbar"><button :disabled="busy" @click="reconcile(true)">以最新版本保留草稿</button><button class="secondary" :disabled="busy" @click="reconcile(false)">采用最新配置，放弃草稿</button></div></div>
-    <BackendRuntimePanel v-if="mode === 'real'" />
+    <BackendRuntimePanel v-if="mode === 'real'" editing-config :room-draft="draft?.roomId" :config-pending="busy || needsReview || !!latest" @room-lock="roomLocked = $event" />
     <RuntimePanel v-else :bootstrap="bootstrap" :saved-version="saved?.version ?? null" :settings="saved?.settings ?? null" />
     <form v-if="draft && saved" @submit.prevent="save">
-      <div class="form-title"><div><h2>基础配置</h2><p class="muted">已保存 v{{ saved.version }} · {{ dirty ? '有未保存修改' : '草稿与保存版本一致' }}</p><p class="muted">保存时间：{{ new Date(saved.updatedAt).toLocaleString('zh-CN') }}</p></div><button type="submit" :disabled="busy || needsReview || !!latest || !dirty">{{ busy ? '处理中…' : '保存配置' }}</button></div>
+      <div class="form-title"><div><h2>基础配置</h2><p class="muted">已保存 v{{ saved.version }} · {{ dirty ? '有未保存修改' : '草稿与保存版本一致' }}</p><p class="muted">保存时间：{{ new Date(saved.updatedAt).toLocaleString('zh-CN') }}</p></div><button type="submit" :disabled="busy || needsReview || !!latest || !dirty || (mode === 'real' && roomDirty && roomLocked)">{{ busy ? '处理中…' : '保存配置' }}</button></div>
       <p v-if="needsReview" class="message warning">保存结果需要核对。请点击“读取最新版本”，草稿会保留。</p>
+      <p id="room-help" class="muted">修改房间号后需要保存，停止并重新启动会话后生效。保存或刷新页面不会自动连接抖音。{{ mode === 'real' && roomLocked ? '会话运行或状态未知时，房间输入暂时锁定。' : '' }}</p>
       <fieldset :disabled="busy"><div class="fields">
-        <label>配置名称<input v-model="draft.profileName" required maxlength="80"></label><label>直播间号<input v-model="draft.roomId" inputmode="numeric" pattern="[0-9]{0,30}" maxlength="30" placeholder="暂未填写"></label>
+        <label>配置名称<input v-model="draft.profileName" required maxlength="80"></label><label>直播间号<input v-model="draft.roomId" :disabled="mode === 'real' && roomLocked" aria-describedby="room-help" inputmode="numeric" pattern="[0-9]{0,30}" maxlength="30" placeholder="暂未填写"></label>
         <label>模型名称<input v-model="draft.model" required maxlength="100"></label><label>最大输出 tokens<input v-model.number="draft.maxOutputTokens" type="number" min="32" max="2048" step="1" required></label>
         <label>音色标识<input v-model="draft.voice" required maxlength="100"></label><label>欢迎间隔（秒）<input v-model.number="draft.welcomeIntervalSeconds" type="number" min="5" max="600" step="1" required></label>
         <label>合成队列容量<input v-model.number="draft.synthesisQueueCapacity" type="number" min="1" max="100" step="1" required></label><label>播放队列容量<input v-model.number="draft.playbackQueueCapacity" type="number" min="1" max="100" step="1" required></label>
