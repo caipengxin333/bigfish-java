@@ -1,3 +1,102 @@
+# 真实抖音房间初始化修复（2026-11-01）
+
+本节是最新交接；下方首轮记录及 `phase3-collector.md` 保留历史背景。工作树：`bigfish-worktrees/collector`，分支：`feature/douyin-collector`。
+
+## 基线、提交与范围
+
+- 开工目录/分支正确，工作区干净；从 `d7b6fdc` 快进合入最新本地 main `5d93ed5f9db94781a92835c30a3ff71d47bfa71a`。
+- 实现提交：**`2129a37fa2cb3a875710e60940cf6786aea90595`**，`fix(collector): accept current guest room hydration`。
+- 实现提交后在干净工作区再次执行 `git merge --no-edit main`：Already up to date；祖先检查通过。未更新 main、未合并其他功能分支、未推送或创建 PR。
+- 修改仅为 `collector/DouyinGuestSession.java`、`collector/DouyinRoomPage.java`，对应 `DouyinGuestSessionTest`、`DouyinRoomResolverTest`、`NativeCollectorPipelineTest` 及人工夹具 `collector/room-pace-bootstrap.html`。本文件记录交付。未修改公共 DTO、依赖、前端、会话管理、模型、语音或签名算法。
+
+## 已定位并修复的三个原因
+
+1. **页面下发与 UA 不兼容。** 原通用 Java UA 请求游客首页成功，但房间请求返回 HTTP 200、空正文、非 HTML 类型；调整 Origin/Referer 的只读对照仍为空。使用固定页面兼容 UA 后取得完整房间 HTML。生产改为带 `BigFishCollector/0.1` 标识的固定 Chrome/WebKit 兼容字符串，首页、房间、签名输入及 WSS 使用同一值。这是 HTTP 页面兼容标记，不是安装/运行 Chrome，不增加操作系统、屏幕或其他指纹字段；没有 UA 轮换、执行页面脚本或处理验证挑战。之前“通用 Java UA 可直接获取房间”的假设被真实响应否定。
+2. **Pace 流的初始空状态。** 页面先发送 `roomStore.roomInfo={}`，再发送完整的 `roomInfo.roomId / room.id_str / room.status / anchor`。原实现遇到第一个空对象立即失败。现在仅跳过确切的空对象，仍必须找到有效完整房间；仅空状态、null、数组、残缺信息、冲突房间/状态均失败。没有取消网页号与内部房间校验。
+3. **游客 ID 扫描被无关展示数据阻断。** 真实 LIVE 页面中展示数组超过旧遍历深度 24；房间元数据已经解析成功，`guestId()` 却提前抛出 `PAGE_STRUCTURE_CHANGED`。现在遍历预算与现有 JSON 深度预算统一为 64。保留页面 2 MiB 上限、超深拒绝、重复字段/访客 ID 冲突检查；仍只使用明确的 `user_unique_id`，不使用主播 ID 或固定替代值。
+
+夹具只保留上述形状：空初始 store、完整 store、30 层无关展示数组；所有房间/主播/访客标识及文本均为人工数据。没有提交真实 HTML、Cookie、访客 ID、用户消息、签名 URL 或原始消息帧。
+
+## 分类与回归
+
+- 空 HTTP 200 响应证据不足，仍归 `PAGE_STRUCTURE_CHANGED`，不能据此断言房间号错误、已下播或登录失效。
+- 明确 `room.status=4` 才是 ENDED；明确登录/验证/地区页面及对应 HTTP 状态继续按既有固定码处理，不回退其他身份。
+- 回归覆盖空初始状态前后顺序、只有空状态、残缺/冲突房间、LIVE/ENDED、深层展示数据、缺失或冲突游客 ID、超深拒绝、登录与验证页、空房间响应不签名。
+- 既有本机完整链路现在使用新流式夹具：游客首页 Cookie → 房间 → 原生 signer → 实际 JDK 回环 WSS → 评论/礼物/关注/入场 → ACK/心跳 → ENDED/资源释放。替身模拟“通用 UA 首页正常、房间为空”，没有外网访问。
+- 保留原有房间变化、重连、取消、资源释放、去重/礼物增量及全部后端回归断言。
+
+## 本地测试结果
+
+| 命令/检查 | 结果 |
+| --- | --- |
+| `./scripts/maven.sh -B -ntp -pl backend '-Dtest=cn.bigfish.collector.*Test' test`（基线） | 78/78 通过 |
+| `-Dtest=DouyinRoomResolverTest,NativeCollectorPipelineTest test`（新增回归、修复前） | 14 项，1 failure + 1 error，复现 UA 与初始空 store 问题 |
+| 全部采集回归（前两处修复） | 80/80 通过 |
+| `-Dtest=DouyinGuestSessionTest test`（深层回归、深度修复前） | 11 项，1 error，复现游客递归深度问题 |
+| 全部采集回归（三处修复） | 82/82 通过 |
+| `./scripts/maven.sh -B -ntp test`（最终代码与空响应补充回归） | **237 项：235 通过，2 项真实 NLS/Token 默认跳过，0 failure / error；其中 collector 83/83 通过** |
+| `git diff --check`、`git diff --cached --check` | 通过 |
+
+最终完整回归 2026-11-01 23:51:24 +08:00 结束，耗时 25.949 秒。仅使用本地替身和回环临时端口；没有调用 DeepSeek、NLS 或 Token 签发。没有删除文件、跳过既有保护断言或停止其他窗口进程。
+
+本机测试日志：`/tmp/bigfish-collector-room-baseline.log`、`/tmp/bigfish-room-red-test.log`、`/tmp/bigfish-room-depth-red.log`、`/tmp/bigfish-room-final-collector-test.log`、`/tmp/bigfish-room-full-test.log`。
+
+## 真实只读验证：分层结果
+
+用户先提供 `549511642024`，随后告知该房间已结束，并授权改用 `440132407257`。所有请求来自独立游客上下文，没有复制主项目配置/数据库/密钥或浏览器登录 Cookie。
+
+| 分项 | 实际证据 | 结论 |
+| --- | --- | --- |
+| 原房间 | 通用 UA 的 3 组对照均为首页正常、房间空响应；兼容 UA 取得 HTML，观察到完整房间 `status=4`，当时完整解析仍被前置空 store 阻断 | 与用户告知已结束一致；没有对原房间启动接收，不把空响应当作下播依据 |
+| 新房间最终 resolve | 正式 `DouyinCollectorProbe`：`state=LIVE credentials=guest roomResolved=true`；HTTP 2，2307 ms，在途 0 | **房间与游客初始化通过**；没有 WSS 或模型/语音调用 |
+| 新房间 receive | 60 秒观察预算；总耗时含停止清理 60123 ms；HTTP 2、签名 1、WSS 尝试 1、连接成功 1，重连 0 | **握手通过**，停止前 CONNECTED |
+| 自然消息 | COMMENT 0、GIFT 0、FOLLOW 0、ENTRANCE 0、LIKE 0；ACK 0、心跳 6、MALFORMED 92 | **真实评论接收未通过，真实礼物未验证**；不能据此断言直播间没有发言或礼物 |
+| 停止与资源 | STOPPED；sourceThreads / dispatchThreads / queuedEvents / attachedTransports / httpInFlight / signingWorkers 均 0，独立进程结束 | 本采集器资源释放通过；不把这些计数解释为整个 JVM 线程数 |
+
+接收输出的固定最后错误为 `MALFORMED`。独立 probe 因没有有效评论而返回 2，Maven 返回 1 / BUILD FAILURE，这是接收验收未通过的真实结果，不是本地单元测试失败；没有把握手成功冒充端到端成功。
+
+### 本轮真实请求账本
+
+| 只读检查 | 房间 | HTTP 发起数 | WSS 尝试数 |
+| --- | --- | ---: | ---: |
+| 原请求结构检查 | 原房间 | 2 | 0 |
+| 导航头对照 | 原房间 | 2 | 0 |
+| 空响应头名称检查（不输出值） | 原房间 | 2 | 0 |
+| 固定兼容 UA 对照 | 原房间 | 2 | 0 |
+| 前两处修复后的正式 resolve（游客深度失败） | 新房间 | 2 | 0 |
+| 房间与游客解析分步定位 | 新房间 | 2 | 0 |
+| 游客遍历深度定位 | 新房间 | 2 | 0 |
+| 最终正式 resolve | 新房间 | 2 | 0 |
+| 一次 60 秒 receive | 新房间 | 2 | 1 |
+| **合计** | | **18** | **1** |
+
+临时诊断工具最初遇到 JDK 路径、编译和 source launcher 包访问问题，均在网络调用前退出，额外 HTTP/WSS 为 0。上表计数是发起数。所有结构检查只输出字段类型、固定分类、布尔值及计数；真实响应仅在内存中使用，没有保存页面或帧。
+
+正式证据日志：`/tmp/bigfish-room-final-resolve.log`、`/tmp/bigfish-room-receive.log`。结构定位日志：`/tmp/bigfish-room-structure.log`、`/tmp/bigfish-room-navigation-structure.log`、`/tmp/bigfish-room-header-structure.log`、`/tmp/bigfish-room-compatible-structure.log`、`/tmp/bigfish-room-new-structure.log`、`/tmp/bigfish-room-guest-structure.log`。
+
+## 集成与剩余事项
+
+1. 主窗口审核并合入本地功能分支后重启后端，才能使用新 Java 解析实现。公共 DTO、OpenAPI、线上播放协议和依赖保持兼容，本轮无需新增公共接口。
+2. **继续保留真实接收 UNVERIFIED。** 可以说明“本轮指定房间解析及握手已验证”，不能把供应商能力、CONNECTED 或本地链路测试升级为真实评论/礼物接收通过。公共能力文案及 README/provider 文档的统一更新交主窗口处理，本分支仅更新采集交接。
+3. 下一项采集待办是 `MALFORMED`：需在另一次明确授权且在播的短测中，仅提取最小脱敏 wire 结构定位入站封装/压缩/字段解码差异，再补回归。本轮没有保存真实帧，因此不猜测具体协议根因，也没有额外启动第二轮接收或修改签名/协议算法。
+4. 本轮没有验证真实礼物连击语义、长时间重连、主会话真实消息进入模型/TTS/舞台。页面兼容依赖平台当前结构，保留有界失败及固定错误分类；不得自动重试不同身份或绕过登录/验证限制。
+
+再次只读 resolve 的命令（房间是否仍在播须当时确认；不是自动运行指令）：
+
+```bash
+env BIGFISH_DOUYIN_LIVE_PROBE=true BIGFISH_DOUYIN_ROOM=440132407257 \
+  BIGFISH_DOUYIN_PROBE_ACTION=resolve BIGFISH_DOUYIN_CREDENTIAL_MODE=guest \
+  ./scripts/dev-backend.sh -B -ntp \
+  -Dspring-boot.run.main-class=cn.bigfish.collector.DouyinCollectorProbe
+```
+
+该脚本读取 collector 自身 `runtime/worktree.env`，独立 probe 不启动 Spring，不使用主项目数据库或 18080 服务，不触发付费调用。
+
+---
+
+以下为首轮历史交接，不能覆盖上方最新真实验证结果。
+
+
 # Java 抖音消息采集器交接
 
 任务/分支：抖音采集 / feature/douyin-collector。

@@ -65,6 +65,30 @@ class DouyinRoomResolverTest {
         }
     }
 
+    @Test void emptyStreamBootstrapCanPrecedeOrFollowTheCompleteRoom() throws Exception {
+        String html = fixture("pace-bootstrap");
+        var room = resolver(html).resolve("123456", credentials());
+        assertTrue(room.live()); assertEquals("7000000000000000001", room.internalRoomId());
+        assertEquals("9001", DouyinRoomPage.guestId(html));
+        assertFalse(resolver(html.replace("\\\"status\\\":2", "\\\"status\\\":4")).resolve("123456", credentials()).live());
+        String empty = "<script>{\"roomStore\":{\"roomInfo\":{}}}</script>";
+        assertEquals(room, resolver(html + empty).resolve("123456", credentials()));
+        assertEquals(PAGE_STRUCTURE_CHANGED, assertThrows(DouyinFailure.class,
+                () -> resolver(empty).resolve("123456", credentials())).code());
+    }
+
+    @Test void partialOrConflictingStreamStoresAreNotTreatedAsEmptyBootstrap() throws Exception {
+        String valid = fixture("pace-bootstrap");
+        for (String info : List.of("null", "[]", "{\"roomId\":\"999\"}", "{\"room\":{}}")) {
+            String partial = "<script>{\"roomStore\":{\"roomInfo\":" + info + "}}</script>";
+            assertEquals(PAGE_STRUCTURE_CHANGED, assertThrows(DouyinFailure.class,
+                    () -> resolver(partial + valid).resolve("123456", credentials())).code());
+        }
+        assertEquals(PAGE_STRUCTURE_CHANGED, assertThrows(DouyinFailure.class,
+                () -> resolver(valid + valid.replace("7000000000000000001", "7000000000000000002"))
+                        .resolve("123456", credentials())).code());
+    }
+
     @Test void unknownConflictingOrDifferentRoomMetadataFailsClosed() throws Exception {
         String html = fixture("live");
         for (String body : List.of("<script>{\"roomId\":\"123\"}</script>", html.replace("\"status\":2", "\"status\":0"),

@@ -79,7 +79,9 @@ final class DouyinRoomPage {
 
     private static void collectGuestIds(JsonNode node, java.util.Set<String> ids, int depth) throws Exception {
         if (node == null) return;
-        if (depth > 24) throw new DouyinFailure(PAGE_STRUCTURE_CHANGED);
+        // The real room hydration includes unrelated display arrays deeper than 24 levels.
+        // Keep traversal bounded by the same depth budget as JSON reading instead of rejecting those pages.
+        if (depth > 64) throw new DouyinFailure(PAGE_STRUCTURE_CHANGED);
         if (node.isObject()) {
             for (var field : node.properties()) {
                 if (field.getKey().equals("user_unique_id")) {
@@ -118,6 +120,9 @@ final class DouyinRoomPage {
             JsonNode store;
             try (var parser = JSON.createParser(source.substring(stores.start(1)))) { store = JSON.readTree(parser); }
             JsonNode info = store.path("roomInfo"), room = info.path("room"), anchor = info.path("anchor");
+            // Pace hydration emits an empty bootstrap store before the populated room store.
+            // Only that exact placeholder is ignorable; partial/null/conflicting metadata still fails closed.
+            if (info.isObject() && info.isEmpty()) continue;
             String internal = room.path("id_str").asText("");
             if (internal.isEmpty()) internal = info.path("roomId").asText("");
             String alternate = info.path("roomId").asText(internal);

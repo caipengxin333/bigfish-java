@@ -25,14 +25,20 @@ class NativeCollectorPipelineTest {
     }
 
     private void verifyPipeline(boolean guest) throws Exception {
-        byte[] html = DouyinGuestSessionTest.guestPage("9001").replace("7000000000000000001", "123").getBytes(StandardCharsets.UTF_8);
+        byte[] html = (guest ? DouyinRoomResolverTest.fixture("pace-bootstrap") : DouyinGuestSessionTest.guestPage("9001")).replace("7000000000000000001", "123").getBytes(StandardCharsets.UTF_8);
         var httpCalls = new AtomicInteger();
         var events = new CopyOnWriteArrayList<LiveEvent>();
         var defaults = CollectorOptions.defaults();
         var options = new CollectorOptions(32, defaults.queueTtl(), defaults.cacheCapacity(), defaults.cacheTtl(),
                 defaults.reconnectBase(), defaults.reconnectMax(), Duration.ofMillis(100), Duration.ofSeconds(5), defaults.maxFrameBytes());
         try (var http = new DouyinRoomResolverTest.LocalHttp(exchange -> {
-            httpCalls.incrementAndGet(); exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+            httpCalls.incrementAndGet();
+            // Reproduce the observed page delivery distinction; never fetch the real platform in tests.
+            if (guest && !exchange.getRequestURI().getPath().equals("/")
+                    && !exchange.getRequestHeaders().getFirst("User-Agent").contains("Chrome/")) {
+                exchange.sendResponseHeaders(200, -1); exchange.close(); return;
+            }
+            exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
             if (guest && exchange.getRequestURI().getPath().equals("/")) {
                 assertNull(exchange.getRequestHeaders().getFirst("Cookie"));
                 exchange.getResponseHeaders().add("Set-Cookie", "ttwid=synthetic-guest; Domain=.douyin.com; Path=/; HttpOnly; Secure");
@@ -54,6 +60,7 @@ class NativeCollectorPipelineTest {
                     if (guest) {
                         assertTrue(connection.endpoint.getRawQuery().contains("user_unique_id=9001&"));
                         assertEquals("ttwid=synthetic-guest", connection.headers.get("Cookie"));
+                        assertEquals(DouyinGuestSession.USER_AGENT, connection.headers.get("User-Agent"));
                     }
                     // Test-only target substitution; production destination validation remains unchanged.
                     transport.openEndpoint(peer.uri(), connection.headers);
