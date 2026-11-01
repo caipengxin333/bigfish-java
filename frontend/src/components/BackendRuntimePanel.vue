@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import type { SessionControls } from '../session-controls.ts'
 import { createLaunchOptions } from '../launch-options.ts'
 import { createSessionControls, collectorSummary, safeCode, sourceLabel } from '../session-controls.ts'
+import { sessionHealth } from '../session-health.ts'
 const props = defineProps<{ compact?: boolean; editingConfig?: boolean; roomDraft?: string; configPending?: boolean; controls?: SessionControls }>()
 const emit = defineEmits<{ roomLock: [locked: boolean] }>()
 const controls = props.controls ?? createSessionControls(undefined, undefined, () => props.editingConfig
@@ -21,6 +22,7 @@ const waitingLabels: Record<string, string> = {
 }
 const timeLabel = (value: string | null) => value ? new Date(value).toLocaleTimeString() : '暂无'
 const recent = computed(() => diagnostics.value?.recent.slice(-8).reverse() ?? [])
+const health = computed(() => sessionHealth(runtime.value, diagnostics.value, undefined, loadError.value))
 watch(locked, value => emit('roomLock', value), { immediate: true, flush: 'sync' })
 onMounted(() => {
   if (!props.compact) { preferences.reload(); window.addEventListener('storage', preferences.onStorage) }
@@ -30,13 +32,16 @@ onBeforeUnmount(() => { if (!props.controls) controls.dispose(); window.removeEv
 </script>
 <template>
   <section class="panel" aria-label="后端会话控制">
+    <div v-if="!compact" class="health-summary" :class="health.tone" :role="health.tone === 'error' ? 'alert' : 'status'">
+      <h2>{{ health.title }}</h2><p>{{ health.detail }}</p><p v-if="health.next" class="health-next"><strong>下一步：</strong>{{ health.next }}</p>
+      <ol v-if="health.steps.length" class="health-steps"><li v-for="step in health.steps" :key="step.label" :class="{ failed: step.failed }"><span>{{ step.label }}</span><strong>{{ step.value }}</strong></li></ol>
+    </div>
     <h2>{{ compact ? '互动与处理状态' : '本浏览器启动选项' }}</h2>
     <p class="muted">{{ compact ? '以下展示后端实际互动状态；消息来源和服务选项在管理页设置。' : '当前连接真实后端接口（transport=real）；消息来源由下方单独选择。' }} 浏览器演示 transport=mock 不连接直播。</p>
     <p class="message">当前消息来源：{{ sourceLabel(runtime?.mode) }} · {{ runtime?.conversationMode ?? '未读取' }} 回复 · {{ runtime ? (runtime.speechMode === 'ALIYUN_NLS' ? '阿里云 NLS 人声' : '300ms 本地测试音') : '语音状态未读取' }}</p>
     <p v-if="loadError" class="message error" role="alert">{{ loadError }}</p>
     <p v-if="inconsistency" class="message warning" role="alert">{{ inconsistency }}</p>
     <p v-if="error" class="message error" role="alert">{{ error }}</p><p v-if="notice" class="message" role="status">{{ notice }}</p>
-    <p v-if="runtime?.lastError" class="message error" role="alert">最近任务错误：{{ runtime.lastError }}（{{ runtime.lastErrorAt }}）</p>
     <div v-if="!compact" class="toolbar" @change="saveOptions">
       <label>消息来源 <select v-model="selection.mode" :disabled="locked" aria-describedby="source-availability"><option value="MOCK">模拟采集</option><option value="DOUYIN" :disabled="!availability.enabled">抖音直播</option></select></label>
       <label>回复服务 <select v-model="selection.conversationMode" :disabled="busy || !stopped"><option value="MOCK">MOCK 模拟回复</option><option value="DEEPSEEK" :disabled="!providers?.deepseek.enabled">DeepSeek</option></select></label>
@@ -44,7 +49,7 @@ onBeforeUnmount(() => { if (!props.controls) controls.dispose(); window.removeEv
     </div>
     <p v-if="!compact" class="muted">以上三项选择自动保存于本浏览器，供舞台“开始互动”使用；它们不属于后端业务配置，不会自动启动或更改正在运行的会话。</p>
     <p v-if="preferenceError" class="message error" role="alert">{{ preferenceError }}</p>
-    <p id="source-availability" class="muted" role="status">抖音可用性：{{ availability.reason }}</p>
+    <p id="source-availability" class="muted" role="status">抖音接入能力：{{ availability.reason }}</p>
     <p class="muted">已保存房间：{{ saved?.settings.roomId || '未填写' }}{{ saved ? `（v${saved.version}）` : '' }}。修改房间号后需要保存，停止并重新启动会话后生效；启动不会自动保存表单。</p>
     <p v-if="selection.mode === 'DOUYIN' && roomProblem" class="message warning" role="alert">{{ roomProblem }}</p>
     <p v-if="compact" class="muted small">房间号请在管理页保存；本页仅使用后端已保存值，其他页面的未保存输入不会用于连接。</p>
@@ -65,6 +70,8 @@ onBeforeUnmount(() => { if (!props.controls) controls.dispose(); window.removeEv
       <span>后端互动会话：{{ runtime?.state ?? '状态未知' }} · 后端播放租约{{ runtime?.player.ready ? '已就绪' : '未就绪' }}</span>
     </div>
     <p v-if="stopped && startProblem && !roomProblem" class="muted" role="status">{{ startProblem }}</p>
+    <details><summary>状态详情与错误码</summary>
+    <p v-if="runtime?.lastError" class="muted small">最近记录的错误：{{ safeCode(runtime.lastError) }}（{{ runtime.lastErrorAt }}）。历史记录不代表当前仍未恢复。</p>
     <template v-if="runtime">
       <p class="muted session-identity">会话：{{ runtime.sessionId || '尚未启动' }} · 当前运行房间：{{ runtime.roomId || '无' }}</p>
       <p role="status">{{ collectorSummary(runtime) }}</p>
@@ -81,6 +88,7 @@ onBeforeUnmount(() => { if (!props.controls) controls.dispose(); window.removeEv
         <p v-for="trace in recent" :key="trace.sequence">{{ timeLabel(trace.at) }} · {{ trace.eventType || '无效事件' }} · {{ trace.stage }} / {{ trace.reason }} · 阶段耗时 {{ trace.previousStageMs }}ms · 任务耗时 {{ trace.taskElapsedMs }}ms</p>
       </details>
     </template>
+    </details>
     <details class="runtime-debug"><summary>高级调试：模拟事件与队列</summary>
     <div class="toolbar">
       <button class="secondary" :disabled="!canSimulate" @click="action('COMMENT')">发送模拟评论</button>

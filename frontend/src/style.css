@@ -516,7 +516,21 @@ meter {
 /* Session identities and capability explanations must fit narrow stage controls. */
 .session-identity,.panel>p { overflow-wrap:anywhere; }
 .toolbar label { min-width:0; }
+.health-summary { padding:20px; border:1px solid #d5e3de; border-left:4px solid #6d8981; border-radius:10px; background:#f6f9f8; margin-bottom:20px; }
+.health-summary.error { background:#fff3ef; border-color:#efc6b8; border-left-color:#c25434; color:#763a29; }
+.health-summary.warning { background:#fff8e7; border-color:#ead7a6; border-left-color:#ba8b29; }
+.health-summary.success { background:#edf7f1; border-left-color:#258675; }
+.health-summary h2 { margin:0 0 8px; font-size:20px; }
+.health-summary p { margin:6px 0; font-size:14px; }
+.health-next { margin-top:12px!important; }
+.health-steps { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; list-style:none; padding:0; margin:18px 0 0; }
+.health-steps li { display:flex; flex-direction:column; gap:6px; padding:10px 12px; border:1px solid #dce6e4; border-radius:8px; color:#48605a; background:#ffffffa6; font-size:12px; min-width:0; overflow-wrap:anywhere; }
+.health-steps li.failed { color:#9b3e24; border-color:#df9e89; }
+.health-steps strong { font-size:14px; }
+.stage-diagnostics>.panel { margin-top:16px; padding:18px; box-shadow:none; }
 @media(max-width:760px) {
   .toolbar label { flex:1 1 180px; }
   .stage-status { flex-wrap:wrap; }
+  .health-steps { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .health-summary { padding:16px; }
 }

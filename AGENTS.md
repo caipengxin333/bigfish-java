@@ -28,3 +28,4 @@
 - 后端验证：`./scripts/maven.sh test`；前端：`cd frontend && npm ci && npm run build`。具体行为需要针对性测试。
 - 日志记录 error type、耗时和脱敏上下文，不打印 Cookie、签名 URL 或 Key。
 - 当前已集成显式 MOCK/DOUYIN 会话、DeepSeek/NLS、STATIC/RAM Token、任务诊断及舞台一键互动。DOUYIN 能力开放不代表接收通过；最近真实解析返回 PAGE_STRUCTURE_CHANGED，真实评论/礼物仍未验收。普通切后台不主动断开，冻结/失效后手动恢复同会话。最新集成结果见 docs/handoffs/phase5-integration.md；RAM 云端签发与长期后台稳定性未验收。须保留 c8be17c 的 PCM 转 WAV、停止/租约隔离及主窗口音频中断释放播放端修复。
+- 前端最新故障摘要修补见 docs/handoffs/failure-summary-ui.md；后续先同步 main，保留采集根因优先、同会话诊断证据及默认折叠的技术详情，不能把后续播放断开显示为首要故障。

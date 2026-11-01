@@ -64,3 +64,14 @@ test('actual stage panel renders live state and room, locks source and disables 
   assert.match(html, /CONNECTION_CLOSED/); assert.match(html, /其他页面的未保存输入不会用于连接/)
   assert.deepEqual(locks, [true])
 })
+test('failed collection has a plain-language summary before collapsed technical details', async () => {
+  const data = structuredClone({ ...fixtures })
+  data.runtime = { ...data.runtime, sessionId: 'failed-session', state: 'FAILED', mode: 'DOUYIN', lastError: 'COLLECTOR_FAILED',
+    collector: { ...data.runtime.collector, mode: 'DOUYIN', state: 'FAILED', lastError: 'PAGE_STRUCTURE_CHANGED' } }
+  const { html } = await render(data)
+  assert.match(html, /抖音采集失败，互动已停止/)
+  assert.match(html, /需要适配采集页面解析/)
+  assert.ok(html.indexOf('抖音采集失败') < html.indexOf('<details'))
+  assert.ok(html.indexOf('状态详情与错误码') < html.indexOf('PAGE_STRUCTURE_CHANGED'))
+  assert.doesNotMatch(html, /<details[^>]* open/)
+})
