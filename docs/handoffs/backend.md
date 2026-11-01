@@ -1,3 +1,107 @@
+# Live2D 外部静态资源服务交接（2026-11-02）
+
+本节为本轮最新交付；下方历史内容保留。工作树 `bigfish-worktrees/backend`，分支 `feature/backend-core`。
+
+## 基线与提交
+
+- 开工时目录/分支正确，工作区干净，HEAD 为 `e1db461`；先快进合入当时最新本地 main **`15be0b96c0e71fc8eb29c6320f33fe03ac74cb8a`**。
+- 资源服务实现提交：**`be893e494057cf12aacc573e0f911f9b7bce812b`**（`feat(backend): serve bounded external avatar assets read-only`）。
+- 交付前 main 新增许可证文档。实现提交后在干净工作区合入 **`d8fccd2376caf603123c056d81ba42a7ccaa1490`**，本分支合并提交/最终代码基线为 **`ee56fc0934617ea7804b01b5f39a17c55394123c`**。该增量仅为 LICENSE、README、THIRD_PARTY_NOTICES；`git diff be893e4 HEAD -- backend` 为空，已验证的 Java/配置/测试未变化。main 祖先检查通过。
+- 本文单独提交，文档提交 SHA 见本轮最终回复，或 `git log -1 --format=%H -- docs/handoffs/backend.md`。全部提交仅在本地功能分支；未合并回 main、未推送、未联系其他窗口。
+
+## 实际文件范围
+
+1. `backend/src/main/java/cn/bigfish/configuration/AvatarAssetsConfiguration.java`：启动目录校验、独立静态资源映射、原始 URI 防护、真实路径约束、MIME、缓存验证与流式文件响应。
+2. `backend/src/main/resources/application.yml`：仅增加 `bigfish.avatar.assets-dir: ${BIGFISH_AVATAR_ASSETS_DIR:}`。
+3. `backend/src/test/java/cn/bigfish/core/AvatarAssetsIntegrationTest.java`、`AvatarAssetsDisabledTest.java`：10 项资源专项测试。
+4. `docs/handoffs/backend.md`：在顶部增加本轮交接，保留历史内容。
+
+没有修改 frontend、采集、模型回复、语音、播放调度、公共 contract/OpenAPI、数据库结构、脚本或依赖。既有 PageController 无需修改；新增 URI guard 只对 `/avatar-assets/` 原始请求生效，防止容器先将穿越路径规范化后转交其他控制器。
+
+## 配置与目录
+
+启动环境变量 **`BIGFISH_AVATAR_ASSETS_DIR`**，对应 Spring 配置 **`bigfish.avatar.assets-dir`**。必须指定已有、可读且可进入的**绝对目录**；仅在启动时读取，变更根目录需重启后端。HTTP 请求和业务配置 API 不能更换目录。
+
+```text
+/绝对路径/bigfish-avatar-assets/
+  models/
+    BigFish/
+      BigFish.model3.json
+      大肥鱼.moc3
+      BigFish.physics3.json
+      textures/texture_00.png
+      expressions/笑脸.exp3.json
+  sdk/
+    live2dcubismcore.min.js
+```
+
+模型入口：`/avatar-assets/models/BigFish/BigFish.model3.json`；Core 入口：`/avatar-assets/sdk/live2dcubismcore.min.js`。中文文件名、UTF-8 编码路径及目录内正常相对资源引用可用。这里只放允许公开的模型文件；不要混放凭据或运行数据。
+
+开发启动示例，在本工作树执行（脚本继续读取自己的 `runtime/worktree.env`，端口 18081）：
+
+```bash
+BIGFISH_AVATAR_ASSETS_DIR="/绝对路径/bigfish-avatar-assets" ./scripts/dev-backend.sh
+```
+
+JAR 启动示例（`runtime` 为本实例已存在的独立数据目录）：
+
+```bash
+BIGFISH_PORT=18081 BIGFISH_DATA_DIR="$PWD/runtime" \
+BIGFISH_AVATAR_ASSETS_DIR="/绝对路径/bigfish-avatar-assets" \
+java -jar backend/target/bigfish-server-0.1.0-SNAPSHOT.jar
+```
+
+无需启动旧 Python 项目。启动不下载 SDK、不扫描磁盘、不创建直播会话；本轮没有复制真实模型、Core 或旧项目凭据。
+
+## HTTP 与访问范围
+
+| 情况 | 行为 |
+| --- | --- |
+| 未配置/空目录配置值 | 应用正常启动，资源 GET/HEAD 返回 404 |
+| 显式不存在、非目录、不可读/不可进入、相对目录或过宽根目录 | 启动失败，固定 `AVATAR_ASSETS_DIR_INVALID`，说明配置项及所需条件；不携带原始路径/异常原因，不回退其他目录 |
+| 合法 GET / HEAD | 200；HEAD 无响应体且保留正确 Content-Length；文件通过 Spring Resource 流式读取 |
+| Range / If-None-Match | 支持 206 分段与 304 验证；不会为计算 ETag 读取整个文件 |
+| 缺文件、目录、非允许文件 | 404；不会返回 SPA index.html，不提供目录列表 |
+| POST / PUT / PATCH / DELETE / OPTIONS | 405，Allow 为 GET, HEAD；不支持上传、删除、代理或服务端执行 |
+| 穿越、绝对路径、编码/双编码逃逸、反斜杠、隐藏段、分号路径参数 | 应用拒绝 404，部分非法编码由容器提前返回 400 |
+| 符号链接 | 每个请求检查真实路径；必须仍在资源根内，真实目标也必须是允许资源。逃逸及伪装指向 config.json 的链接返回 404 |
+
+允许范围为 `models/<模型目录>/...` 下的 `.moc3`、`.png`，以及 `.model3.json`、`.physics3.json`、`.pose3.json`、`.motion3.json`、`.exp3.json`、`.cdi3.json`、`.userdata3.json`、`.motionsync3.json`。SDK 只允许 `sdk/live2dcubismcore.min.js`。任意 JSON、其他脚本、配置、密钥、SQLite、音频、HTML 不属于发布范围；目录列表及隐藏文件均关闭。
+
+MIME：JSON 为 `application/json`，moc3 为 `application/octet-stream`，PNG 为 `image/png`，Core JS 为 `text/javascript`；设置 `X-Content-Type-Options: nosniff`。
+
+缓存为 `Cache-Control: no-cache, private`，含合法路径的缺文件响应；拒绝路径使用 no-store。弱 ETag 来自高精度修改时间、长度和文件身份的摘要，不保留文件内容缓存，关闭只有秒精度的 Last-Modified 验证。同秒、同长度的正常写入或原子替换可刷新；若维护工具刻意保留所有这些元数据，需要更新时间戳或变更 URL 版本参数。根目录变化需重启，目录内正常文件更新不需重启。
+
+## 验证结果
+
+| 验证 | 实际结果 |
+| --- | --- |
+| `./scripts/maven.sh -B -ntp -pl backend '-Dtest=AvatarAssets*Test' test` | 首批 9/9 通过；随后增加目录进入权限回归，最终专项共 10 项随完整测试全部通过 |
+| 目录可读但不可进入的回归 | 修补前 1 failure，复现未拒绝问题；增加进入权限检查后通过 |
+| 最终 `./scripts/maven.sh -B -ntp test` | **254 项：252 通过，2 项真实 NLS/Token 默认跳过，0 failure/error**；2026-11-02 01:12:34 +08:00 完成，25.977 秒 |
+| `./scripts/maven.sh -B -ntp -DskipTests package` | 最终 BUILD SUCCESS，01:13:19 +08:00 完成；无新依赖或外部资源打包 |
+| `scripts/dev-backend.sh` 启动，18081 | 人工资源 GET/HEAD、中文、MIME、404、穿越/符号链接、Range/ETag、页面/API 路由通过，资源读取后会话仍 STOPPED |
+| `java -Xmx96m -jar ...`，18081 | 同样通过；**两个并发 30 MiB 文件响应**正常，客户端按 64 KiB 块读取，不累计完整文件 |
+| JAR 未配置 / 显式无效目录 | 未配置正常启动且资源 404；无效目录固定诊断并退出，不回退 |
+| JAR 检查 | 没有 moc3、model3.json、PNG、Core 或 avatar-assets 条目；3 个资源配置编译类与 JAR 内容逐字节一致，环境变量映射已打包 |
+| 既有行为 | 完整回归包含配置持久化/CAS、真实回环 WebSocket、MOCK 评论/礼物音频、租约与停止隔离、采集修复；原断言均保留 |
+| 差异检查 | `git diff --check` / staged check 通过 |
+
+最初测试遇到沙箱 JVM attach 和端口绑定限制，按权限流程在沙箱外重跑，未删除或弱化断言；另修正了一处新增测试的 AssertJ API 用法。最后四种启动模式均在最终代码和最终 JAR 上串行复验通过。
+
+人工资源及独立 SQLite 位于本工作树忽略目录 `runtime/avatar-smoke-*/`；每次运行仅占用 18081，并在结束时关闭本轮创建的进程，最终端口无监听。没有停止主项目/Luna，没有真实抖音、DeepSeek、NLS 或 Token 调用。临时文件未提交，也没有执行批量删除。
+
+证据：`/tmp/bigfish-avatar-targeted-unrestricted.log`、`/tmp/bigfish-avatar-permission-red.log`、`/tmp/bigfish-avatar-final-test.log`、`/tmp/bigfish-avatar-final-package.log`、`/tmp/bigfish-avatar-final-smoke.log`。临时启动验收脚本为 `/tmp/bigfish-avatar-smoke.py`。
+
+## 主窗口接线与未验证项
+
+1. **开发模式 Vite 需要转发 `/avatar-assets/`。** 当前 `frontend/vite.config.ts` 只代理 `/api`、`/actuator`、`/ws`。建议由前端/主窗口增加 `'/avatar-assets': process.env.BIGFISH_API_TARGET || 'http://127.0.0.1:18080'`；backend 工作树前端环境继续指向 18081。后端不开放跨域来替代同源代理。打包同源页面无需代理。
+2. 本轮仅提供资源服务，不新增上传管理、业务 DTO、OpenAPI 或 WebSocket 字段，公共契约无调整需求。目录路径只留在服务端启动配置，不应回传浏览器。
+3. 本轮未复制/渲染真实模型或 SDK，真实 Live2D 加载、纹理解码、动作/表情、嘴型、授权及前端失败展示由前端和主窗口联调。若实际模型引用非上述约定命名的文件，应先提供具体引用并审核发布范围，不扩大到任意目录/文件。
+4. 没有运行 npm 或 bundle-ui 构建；启动验证用独立人工 index 页面核对 `/admin`、`/stage` 转发和缺失资源不落到 SPA，不能据此宣称真实 Vue/Live2D 渲染已验收。外部模型/Core 必须继续留在外部目录，主窗口正常打包 UI 时也不能复制进 static、target/classes 或 JAR。
+
+---
+
 # Java 后端核心交接
 
 任务/分支：后端核心 / feature/backend-core
