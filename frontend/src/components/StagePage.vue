@@ -8,14 +8,14 @@ import { WebSocketTransport } from '../stage/websocket'
 import { MockStageTransport, mockAudio } from '../mock/stage'
 import type { Scenario } from '../mock/stage'
 import { stageAvatarKey } from '../stage/avatar'
-import PlaceholderAvatar from './PlaceholderAvatar.vue'
+import StageAvatar from './StageAvatar.vue'
 import BackendRuntimePanel from './BackendRuntimePanel.vue'
 import { createSessionControls, sourceLabel } from '../session-controls.ts'
 import { createLaunchOptions } from '../launch-options.ts'
 import { createInteraction } from '../stage/interaction.ts'
 import { bindStageLifecycle } from '../stage/lifecycle.ts'
 import { sessionHealth } from '../session-health.ts'
-const Avatar = inject(stageAvatarKey, PlaceholderAvatar)
+const Avatar = inject(stageAvatarKey, StageAvatar)
 const view = shallowRef<StageView | null>(null)
 const controller = new StageController(new BrowserAudio(mode === 'mock' ? mockAudio : undefined), window.location.origin, value => { view.value = value })
 view.value = { ...controller.view }
@@ -78,7 +78,7 @@ onBeforeUnmount(() => {
         <ol v-if="health.steps.length" class="health-steps"><li v-for="step in health.steps" :key="step.label" :class="{ failed: step.failed }"><span>{{ step.label }}</span><strong>{{ step.value }}</strong></li></ol>
       </div>
       <p v-if="mode === 'real'" class="muted">{{ active ? '本次互动' : '下次启动选项' }}：{{ sourceLabel(actual.mode) }} · {{ actual.conversationMode === 'DEEPSEEK' ? 'DeepSeek 回复' : '模拟回复' }} · {{ actual.speechMode === 'ALIYUN_NLS' ? '阿里云语音' : '本地测试音' }}。已保存房间：{{ controls.saved.value ? (controls.saved.value.settings.roomId || '未填写') : '尚未读取' }}。</p>
-      <p v-else class="message warning">浏览器本地演示：只播放原创测试音，不访问后端、抖音或云服务。</p>
+      <p v-else class="message warning">浏览器本地演示：只播放原创测试音，不调用后端业务接口、抖音或云服务。Live2D 资源从本机加载。</p>
       <p v-if="mode === 'real' && (actual.conversationMode === 'DEEPSEEK' || actual.speechMode === 'ALIYUN_NLS')" class="muted small">当前选项包含云服务，处理消息时可能产生费用。</p>
       <p v-if="mode === 'real' && selectionMismatch" class="message warning">已有会话与本浏览器启动选项不同，本页保持后端实际选项，不会重配或重启它。</p>
       <p v-if="preferenceError" class="message error" role="alert">{{ preferenceError }}</p>
@@ -116,6 +116,6 @@ onBeforeUnmount(() => {
     </details>
     <details class="panel"><summary>最近播放诊断（最多 40 条）</summary><p v-if="!view.history.length" class="muted">暂无记录。</p><ol v-else class="diagnostics"><li v-for="(item, index) in view.history" :key="index"><time>{{ new Date(item.at).toLocaleTimeString('zh-CN') }}</time><strong>{{ item.code }}</strong><span>{{ item.taskId ? `任务 ${item.taskId}` : '播放端' }}</span></li></ol></details>
     </details>
-    <p class="muted small">当前角色为原创 SVG 占位，已预留可替换渲染组件；未使用旧 Live2D 模型或第三方素材。</p>
+    <p class="muted small">形象仅负责渲染，嘴型跟随本页实际播放音量；切换形象不改变会话、声音授权或播放租约。</p>
   </main>
 </template>
