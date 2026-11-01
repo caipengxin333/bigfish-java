@@ -57,7 +57,7 @@ class NlsTokenProviderTest {
             assertThat(next.toCompletableFuture().get(2, TimeUnit.SECONDS)).isSameAs(second);
             provider.rejected(first); // A late rejection of an old token cannot invalidate the replacement.
             assertThat(provider.acquire(SECOND).toCompletableFuture().join()).isSameAs(second);
-            provider.rejected(second); assertThat(provider.status()).isEqualTo(MISSING);
+            provider.rejected(second); assertThat(provider.status()).isEqualTo(REJECTED);
         }
     }
     @Test void individualWaiterTimeoutDoesNotCancelOtherWaiters() throws Exception {

@@ -57,8 +57,9 @@ public final class AlibabaNlsSpeech implements SpeechPort, AutoCloseable {
     /** No environment is read while disabled. Unknown environment token expiry stays UNVERIFIED. */
     public static AlibabaNlsSpeech create(boolean enabled, Path audioDirectory, ObjectMapper mapper) {
         if (!enabled) throw new SpeechFailure(DISABLED);
-        return create(true, audioDirectory, mapper, System.getenv("BIGFISH_ALIYUN_NLS_APP_KEY"),
-            new StaticNlsTokenProvider(System.getenv("BIGFISH_ALIYUN_NLS_TOKEN"), null));
+        var provider = NlsTokenProviders.create(true, System::getenv, mapper);
+        try { return create(true, audioDirectory, mapper, System.getenv("BIGFISH_ALIYUN_NLS_APP_KEY"), provider); }
+        catch (RuntimeException failure) { provider.close(); throw failure; }
     }
     /** Backend injection for a known-expiry/refreshing provider. This adapter owns and closes the provider. */
     public static AlibabaNlsSpeech create(boolean enabled, Path audioDirectory, ObjectMapper mapper,
@@ -112,11 +113,12 @@ public final class AlibabaNlsSpeech implements SpeechPort, AutoCloseable {
     }
     private void run(Job job, String text, String voice) {
         try {
-            NlsTokenProvider.Token token = await(job, tokens.acquire(remaining(job)).toCompletableFuture());
             byte[] payload = mapper.writeValueAsBytes(Map.of("appkey", appKey, "text", text, "voice", voice,
                 "format", "pcm", "sample_rate", 16000, "volume", 50, "speech_rate", 0, "pitch_rate", 0));
             for (int attempt = 1; attempt <= options.attempts(); attempt++) {
                 check(job);
+                // A retry may follow a long cooldown; reacquire without replaying any successful response.
+                NlsTokenProvider.Token token = await(job, tokens.acquire(remaining(job)).toCompletableFuture());
                 HttpResponse<byte[]> response = request(job, payload, token);
                 SpeechFailure.Code error = classify(response);
                 if (error == TOKEN_REJECTED) tokens.rejected(token);
