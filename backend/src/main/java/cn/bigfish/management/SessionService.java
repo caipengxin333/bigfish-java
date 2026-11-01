@@ -61,6 +61,8 @@ public final class SessionService {
             catch (DouyinFailure failure) { throw new SessionException("DOUYIN_"+failure.code().name(),422); }
         }
         SpeechPort selected=providers.speech(request.speechMode(),settings.voice());
+        // ensureReleased ran above. A failed new engine start must not display the retired source.
+        run=null;
         try { engine.start(request.mode(),request.conversationMode() == StartSessionRequest.ConversationMode.DEEPSEEK,selected,request.speechMode().name()); }
         catch (IllegalStateException error) { throw new SessionException("PROVIDER_UNAVAILABLE", 503); }
         // Empty source waits for an explicit replay; starting a session never invents viewer messages.
@@ -69,6 +71,7 @@ public final class SessionService {
     }
     public synchronized RuntimeView stop(String sessionId) {
         if (!engine.status().sessionId().equals(sessionId)) throw new SessionException("SESSION_MISMATCH", 409);
+        reconcileState(); // Do not erase an already observed source failure when stop wins the scheduler race.
         // Close the engine ingress before cancelling dispatch; any racing callback is rejected.
         if (run!=null) run.open.set(false);
         engine.stop(sessionId);
@@ -123,7 +126,11 @@ public final class SessionService {
     }
     @Scheduled(fixedDelay = 250)
     public synchronized void reconcile() {
-        if (run == null || run.terminal!=null) return;
+        reconcileState();
+    }
+    private CollectorPort.State reconcileState() {
+        if (run == null) return CollectorPort.State.STOPPED;
+        if (run.terminal!=null) return run.terminal;
         var state=run.state();
         if (state==CollectorPort.State.ENDED || state==CollectorPort.State.FAILED) {
             // Close ingress/playback before disposing the source; preserve the terminal evidence.
@@ -132,8 +139,11 @@ public final class SessionService {
             else engine.stop(run.sessionId);
             retire(state);
         } else if (engine.status().state()!=RuntimeEngine.State.RUNNING) retire(CollectorPort.State.STOPPED);
+        // Capture a single source observation; do not mix a later terminal observation with RUNNING.
+        return run.terminal==null ? state : run.terminal;
     }
     public synchronized RuntimeView status() {
+        var collectorState=reconcileState();
         var s = engine.status(); var config = configs.snapshot().settings(); var p = s.playback();
         int capacity = config.synthesisQueueCapacity();
         var d = run == null || run.handle == null ? null : run.handle.diagnostics();
@@ -142,19 +152,23 @@ public final class SessionService {
                 new RuntimeView.Queue(s.comments(),capacity),new RuntimeView.Queue(s.templates(),capacity),
                 new RuntimeView.Queue(s.synthesis(),capacity),new RuntimeView.Queue(p.queued(),config.playbackQueueCapacity()),
                 s.modelActive(),s.speechActive()),new RuntimeView.Player(p.connected(),p.ready(),p.playing(),p.generation()),
-            new RuntimeView.Collector(s.mode(),run == null ? "STOPPED" : run.state().name(),
+            new RuntimeView.Collector(s.mode(),collectorState.name(),
                 d == null ? 0 : d.count(RECEIVED),d == null ? 0 : d.count(EMITTED),d == null ? 0 : d.count(DUPLICATE),
                 run == null ? 0 : run.rejected.get(),run == null ? "" : run.error()),s.dropped(),s.failures(),s.lastError(),s.lastErrorAt());
     }
     /** Read-only evidence, never a connectivity probe. Connected alone is not receive verification. */
     public synchronized ProvidersView.Provider douyinStatus() {
+        var state=reconcileState();
         if (run==null || !run.mode.equals("DOUYIN"))
             return new ProvidersView.Provider(true,true,"UNVERIFIED","LIVE_RECEIVE_NOT_VERIFIED");
         String reason=!run.error().isEmpty() ? run.error()
             : run.accepted.get()>0 ? "LIVE_EVENT_OBSERVED" : "LIVE_RECEIVE_NOT_VERIFIED";
-        var state=run.state();
         boolean active=state==CollectorPort.State.CONNECTING || state==CollectorPort.State.CONNECTED || state==CollectorPort.State.RECONNECTING;
         return new ProvidersView.Provider(true,true,active && run.accepted.get()==0 ? "UNVERIFIED" : state.name(),reason);
+    }
+    /** Local reconciliation only; this method never starts a collector or probes a provider. */
+    public synchronized RuntimeEngine.DiagnosticsView diagnostics() {
+        reconcileState(); return engine.diagnostics();
     }
     private void retire(CollectorPort.State terminal) {
         if (run==null) return;
