@@ -95,3 +95,17 @@ test('page restoration verifies the session, and freezing cancels pending operat
   await f.interaction.resumePage(); assert.equal(f.stage.view.ready, false); assert.match(f.interaction.error.value, /无法确认原会话/)
   f.interaction.freeze(); await flush(); assert.equal(f.stage.view.connection, 'closed')
 })
+
+test('operation failures expose only typed metadata and never change retry behavior', async t => {
+  const f = fixture(); t.after(f.dispose)
+  f.sessions.prepareSession = async () => { throw new RequestError('http', '固定安全提示', 'PROVIDER_UNAVAILABLE') }
+  await f.interaction.start()
+  assert.deepEqual(f.interaction.issue.value, { action: 'start', kind: 'http', code: 'PROVIDER_UNAVAILABLE', sessionId: '' })
+  assert.equal(f.wires.length, 0)
+  f.sessions.prepareSession = async () => active()
+  await f.interaction.start(); f.lease()
+  assert.equal(f.interaction.issue.value, null)
+  f.sessions.stopSession = async () => { throw new RequestError('timeout', '停止超时') }
+  await f.interaction.stop()
+  assert.equal(f.interaction.issue.value?.action, 'stop'); assert.equal(f.stage.view.ready, false)
+})

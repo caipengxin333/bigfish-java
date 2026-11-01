@@ -34,12 +34,17 @@ onBeforeUnmount(() => { if (!props.controls) controls.dispose(); window.removeEv
   <section class="panel" aria-label="后端会话控制">
     <div v-if="!compact" class="health-summary" :class="health.tone" :role="health.tone === 'error' ? 'alert' : 'status'">
       <h2>{{ health.title }}</h2><p>{{ health.detail }}</p><p v-if="health.next" class="health-next"><strong>下一步：</strong>{{ health.next }}</p>
+      <div class="toolbar health-actions">
+        <button v-if="health.action === 'refresh'" class="secondary" :disabled="busy" @click="refresh">刷新状态</button>
+        <a v-if="health.action === 'config'" class="button secondary" href="#configuration">检查管理配置</a>
+        <a v-if="health.action === 'playback' || health.action === 'sound'" class="button secondary" href="/stage?transport=real" target="_blank" rel="noopener">打开舞台处理声音</a>
+      </div>
       <ol v-if="health.steps.length" class="health-steps"><li v-for="step in health.steps" :key="step.label" :class="{ failed: step.failed }"><span>{{ step.label }}</span><strong>{{ step.value }}</strong></li></ol>
     </div>
     <h2>{{ compact ? '互动与处理状态' : '本浏览器启动选项' }}</h2>
     <p class="muted">{{ compact ? '以下展示后端实际互动状态；消息来源和服务选项在管理页设置。' : '当前连接真实后端接口（transport=real）；消息来源由下方单独选择。' }} 浏览器演示 transport=mock 不连接直播。</p>
     <p class="message">当前消息来源：{{ sourceLabel(runtime?.mode) }} · {{ runtime?.conversationMode ?? '未读取' }} 回复 · {{ runtime ? (runtime.speechMode === 'ALIYUN_NLS' ? '阿里云 NLS 人声' : '300ms 本地测试音') : '语音状态未读取' }}</p>
-    <p v-if="loadError" class="message error" role="alert">{{ loadError }}</p>
+    <p v-if="compact && loadError" class="message error" role="alert">{{ loadError }}</p>
     <p v-if="inconsistency" class="message warning" role="alert">{{ inconsistency }}</p>
     <p v-if="error" class="message error" role="alert">{{ error }}</p><p v-if="notice" class="message" role="status">{{ notice }}</p>
     <div v-if="!compact" class="toolbar" @change="saveOptions">
@@ -66,11 +71,12 @@ onBeforeUnmount(() => { if (!props.controls) controls.dispose(); window.removeEv
     </details>
     <div class="toolbar">
       <button v-if="!compact" class="secondary" :disabled="!canStop" @click="action('stop')">停止互动</button>
-      <button class="secondary" :disabled="busy" @click="refresh">刷新状态</button>
+      <button v-if="compact || health.action !== 'refresh'" class="secondary" :disabled="busy" @click="refresh">刷新状态</button>
       <span>后端互动会话：{{ runtime?.state ?? '状态未知' }} · 后端播放租约{{ runtime?.player.ready ? '已就绪' : '未就绪' }}</span>
     </div>
     <p v-if="stopped && startProblem && !roomProblem" class="muted" role="status">{{ startProblem }}</p>
     <details><summary>状态详情与错误码</summary>
+    <p v-for="history in health.history" :key="history" class="muted">历史记录：{{ history }}</p>
     <p v-if="runtime?.lastError" class="muted small">最近记录的错误：{{ safeCode(runtime.lastError) }}（{{ runtime.lastErrorAt }}）。历史记录不代表当前仍未恢复。</p>
     <template v-if="runtime">
       <p class="muted session-identity">会话：{{ runtime.sessionId || '尚未启动' }} · 当前运行房间：{{ runtime.roomId || '无' }}</p>
@@ -79,13 +85,13 @@ onBeforeUnmount(() => { if (!props.controls) controls.dispose(); window.removeEv
       <p v-if="runtime.collector.lastError" class="message error" role="alert">采集错误：{{ safeCode(runtime.collector.lastError) }}。请核对后端状态；不会自动回退为模拟采集。</p>
     </template>
     <template v-if="diagnostics">
-      <p role="status">当前阶段：{{ diagnostics.waiting.map(value => waitingLabels[value] ?? value).join('；') }}</p>
+      <p role="status">当前阶段：{{ diagnostics.waiting.map(value => waitingLabels[value] ?? '未知阶段').join('；') }}</p>
       <p class="muted small">最近模型成功 {{ timeLabel(diagnostics.lastModelSuccessAt) }} · 合成成功 {{ timeLabel(diagnostics.lastSpeechSuccessAt) }} · 播放完成 {{ timeLabel(diagnostics.lastPlaybackSuccessAt) }}</p>
-      <p v-if="diagnostics.lastFailure" class="message warning">最近阶段失败：{{ diagnostics.lastFailure.reason }}（{{ timeLabel(diagnostics.lastFailure.at) }}）；历史失败不代表当前仍未恢复。</p>
+      <p v-if="diagnostics.lastFailure" class="message warning">最近阶段失败：{{ safeCode(diagnostics.lastFailure.reason) }}（{{ timeLabel(diagnostics.lastFailure.at) }}）；历史失败不代表当前仍未恢复。</p>
       <details>
         <summary>查看最近任务阶段</summary>
         <p class="muted small">仅保留有限记录，当前显示最近 8 条阶段变化。任务记录容量淘汰 {{ diagnostics.taskEvictions }}，阶段记录容量淘汰 {{ diagnostics.historyEvictions }}。</p>
-        <p v-for="trace in recent" :key="trace.sequence">{{ timeLabel(trace.at) }} · {{ trace.eventType || '无效事件' }} · {{ trace.stage }} / {{ trace.reason }} · 阶段耗时 {{ trace.previousStageMs }}ms · 任务耗时 {{ trace.taskElapsedMs }}ms</p>
+        <p v-for="trace in recent" :key="trace.sequence">{{ timeLabel(trace.at) }} · {{ safeCode(trace.eventType) }} · {{ safeCode(trace.stage) }} / {{ safeCode(trace.reason) }} · 阶段耗时 {{ trace.previousStageMs }}ms · 任务耗时 {{ trace.taskElapsedMs }}ms</p>
       </details>
     </template>
     </details>

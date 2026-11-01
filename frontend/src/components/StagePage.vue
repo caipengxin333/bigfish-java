@@ -27,17 +27,16 @@ const preferences = createLaunchOptions()
 const { options, error: preferenceError } = preferences
 const controls = createSessionControls()
 const { runtime } = controls
-const health = computed(() => sessionHealth(runtime.value, controls.diagnostics.value, view.value ?? undefined, controls.loadError.value))
 watch([options, controls.stopped], () => { if (controls.stopped.value && !controls.busy.value) controls.selection.value = { ...options.value } })
 const interaction = createInteraction(controller, controls, () => preferences.options.value, () => new WebSocketTransport())
 const { busy: interacting, phase, target, notice: operationNotice, error: operationError } = interaction
+const health = computed(() => sessionHealth(runtime.value, controls.diagnostics.value, view.value ?? undefined, controls.loadError.value, interaction.issue.value))
 const actual = computed(() => runtime.value && ['RUNNING', 'STARTING', 'STOPPING'].includes(runtime.value.state) ? runtime.value : options.value)
 const selectionMismatch = computed(() => !!runtime.value && ['RUNNING', 'STARTING', 'STOPPING'].includes(runtime.value.state) &&
   (runtime.value.mode !== options.value.mode || runtime.value.conversationMode !== options.value.conversationMode || runtime.value.speechMode !== options.value.speechMode))
 const active = computed(() => !!runtime.value && ['RUNNING', 'STARTING', 'STOPPING'].includes(runtime.value.state))
 const recoverable = computed(() => !!target.value && runtime.value?.sessionId === target.value && runtime.value.state === 'RUNNING' && !connected.value)
 const startBlocked = computed(() => mode === 'real' && !active.value && !!runtime.value ? controls.startProblem.value : '')
-const disconnected = computed(() => mode === 'real' && runtime.value?.state === 'RUNNING' && !connected.value && view.value?.connection !== 'connecting')
 const connected = computed(() => view.value?.connection === 'leased')
 const states = { idle: '尚未连接', connecting: '连接与握手中', leased: '已获得播放租约', closed: '已断开 · 静音' }
 function start() {
@@ -88,20 +87,22 @@ onBeforeUnmount(() => {
         <button class="secondary" :disabled="phase === 'stopping' || (!interacting && !active && !connected && view.connection !== 'connecting')" @click="stop">{{ phase === 'stopping' ? '正在确认停止…' : '停止互动' }}</button>
         <button v-if="recoverable" class="secondary" :disabled="interacting || view.connection === 'connecting'" @click="interaction.start(true)">恢复播放</button>
         <button v-if="connected && !view.ready" :disabled="enabling || interacting" @click="enable">{{ enabling ? '启用中…' : '点击启用声音' }}</button>
+        <button v-if="mode === 'real' && health.action === 'refresh'" class="secondary" :disabled="interacting || controls.busy.value" @click="controls.refresh">刷新状态</button>
+        <a v-if="mode === 'real' && health.action === 'config'" class="button secondary" :href="pageUrl('admin') + '#configuration'">检查管理配置</a>
       </div>
-      <p v-if="startBlocked" class="message warning" role="alert">{{ startBlocked }}</p>
-      <p v-if="operationError" class="message error" role="alert">{{ operationError }}</p>
+      <p v-if="startBlocked && !health.blocking" class="message warning" role="alert">{{ startBlocked }}</p>
       <p v-if="operationNotice && !health.blocking && phase !== 'attached'" class="muted" role="status">{{ operationNotice }}</p>
-      <p v-if="disconnected" class="message warning">后端会话仍在运行，本页播放端已断开或尚未接入；不会自动重启会话。</p>
-      <p v-if="mode === 'mock' || (!health.blocking && !view.ready)" class="muted" role="status">播放提示：{{ view.notice }}</p>
+      <p v-if="mode === 'mock'" class="muted" role="status">播放提示：{{ view.notice }}</p>
     </section>
     <section class="stage-canvas" aria-label="播放舞台">
       <div class="stage-status"><span class="live-dot" :class="{ active: view.playing }"></span>{{ view.playing ? '正在播放' : states[view.connection] }}<span class="stage-mode">{{ mode === 'real' ? '后端播放连接' : '浏览器演示' }}</span></div>
       <component :is="Avatar" :mouth-level="view.level" :speaking="view.playing" :connected="connected" />
-      <div class="subtitle" data-testid="subtitle" aria-live="polite">{{ view.subtitle || (mode === 'real' && health.blocking ? '互动暂未运行，请先处理上方提示' : view.ready ? '等待下一段声音' : '点击开始互动，字幕将在实际播放时出现') }}</div>
+      <div class="subtitle" data-testid="subtitle" aria-live="polite">{{ view.subtitle || (mode === 'real' && health.blocking ? '请先处理上方状态提示，当前无法确认可播放' : view.ready ? '等待下一段声音' : '点击开始互动，字幕将在实际播放时出现') }}</div>
       <div class="volume"><span>音量</span><meter min="0" max="1" :value="view.level" aria-label="实时音量"></meter><span>{{ Math.round(view.level * 100) }}%</span></div>
     </section>
     <details class="panel stage-diagnostics"><summary>详细诊断与测试工具</summary>
+    <p v-if="operationError" class="muted">本页操作记录：{{ operationError }}</p>
+    <p v-for="history in health.history" :key="history" class="muted">历史记录：{{ history }}</p>
     <BackendRuntimePanel v-if="mode === 'real'" compact :controls="controls" />
     <p class="muted"><a :href="pageUrl('stage', mode === 'real' ? 'mock' : 'real')">{{ mode === 'real' ? '打开纯浏览器演练（不连接后端）' : '返回真实后端连接' }}</a></p>
     <details><summary>本页播放连接</summary>

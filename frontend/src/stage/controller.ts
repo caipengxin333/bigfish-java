@@ -15,7 +15,7 @@ export interface AudioPort {
 export interface StageView {
   connection: 'idle' | 'connecting' | 'leased' | 'closed'
   ready: boolean; playing: boolean; sessionId: string; taskId: string; subtitle: string; level: number
-  leaseExpiresAt: number; notice: string; history: { at: number; code: string; taskId: string }[]
+  leaseExpiresAt: number; notice: string; history: { at: number; code: string; taskId: string; sessionId: string }[]
 }
 export class StageController {
   readonly view: StageView = { connection: 'idle', ready: false, playing: false, sessionId: '', taskId: '', subtitle: '', level: 0, leaseExpiresAt: 0, notice: '点击开始互动，将连接播放端并申请声音授权。', history: [] }
@@ -41,7 +41,7 @@ export class StageController {
   private emit() { this.notify({ ...this.view, history: [...this.view.history] }) }
   private note(code: string, taskId = '') {
     this.view.notice = reasons[code] ?? '播放端发生错误，已停止当前操作。'
-    this.view.history.unshift({ at: this.now(), code, taskId }); this.view.history.length = Math.min(this.view.history.length, 40)
+    this.view.history.unshift({ at: this.now(), code, taskId, sessionId: this.view.sessionId || this.expectedSession }); this.view.history.length = Math.min(this.view.history.length, 40)
     this.emit()
   }
   connect(transport: Transport, expectedSessionId = '') {
@@ -161,7 +161,7 @@ export class StageController {
   private ack(task: StageTask, state: string, errorCode: string | null) {
     if (!this.validLease()) return
     if (state === 'STARTED') {
-      this.view.history.unshift({ at: this.now(), code: state, taskId: task.taskId })
+      this.view.history.unshift({ at: this.now(), code: state, taskId: task.taskId, sessionId: task.sessionId })
       this.view.history.length = Math.min(this.view.history.length, 40)
     }
     this.send('PLAYBACK_ACK', { taskId: task.taskId, sessionId: task.sessionId, playerId: this.playerId,

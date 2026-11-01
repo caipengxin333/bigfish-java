@@ -190,3 +190,13 @@ test('an unlock completing after lease expiry cannot declare READY', async () =>
   assert.equal(s.controller.view.ready, false); assert.equal(s.wire.sent.some(x => x.type === 'PLAYER_READY'), false)
   s.controller.dispose()
 })
+
+test('local diagnostic entries carry their own session identity for safe presentation', () => {
+  const s = setup()
+  s.lease()
+  s.controller.disconnect('AUDIO_INTERRUPTED')
+  const entry = s.controller.view.history[0]
+  assert.equal(entry.sessionId, 'session-a')
+  assert.equal(entry.code, 'AUDIO_INTERRUPTED')
+  s.controller.dispose()
+})

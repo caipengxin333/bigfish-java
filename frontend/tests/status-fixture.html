@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>故障摘要 · 本地夹具</title><link rel="stylesheet" href="/src/style.css">
+<body class="shell">
+<p class="message warning">仅本地故障夹具：HTTP、WebSocket、音频均为替身，不访问后端、抖音或云服务。页面中的“真实后端”是被测组件文案。</p>
+<div class="toolbar"><label>故障场景<select id="scenario">
+<option value="speech">合成失败、会话继续</option><option value="recovered">合成失败后成功</option><option value="model">模型超时</option>
+<option value="playback">播放失败</option><option value="collector">采集失败引起停止</option><option value="connecting">采集连接中</option><option value="reconnecting">采集重连中</option>
+<option value="ended">直播结束</option><option value="template">礼物模板</option><option value="read">状态读取失败</option><option value="start">启动接口失败</option>
+<option value="blocked">声音被阻止</option><option value="occupied">另一舞台占用</option><option value="disconnect">播放端断线</option>
+</select></label><label>页面<select id="page"><option value="stage">舞台</option><option value="admin">管理页</option></select></label></div>
+<div class="toolbar"><button id="recover">注入后续合成成功</button><button id="read">切换读取失败</button><button id="sound">允许下次声音授权</button><button id="layout">检查宽度与摘要</button></div>
+<output id="evidence" class="message" style="display:block"></output><div id="fixture"></div>
+<script type="module">
+import { bootstrap, snapshot, providers, runtime, diagnostics } from './session-fixtures.ts'
+const params = new URLSearchParams(location.search), scenario = params.get('scenario') || 'speech', page = params.get('page') || 'stage'
+for (const [id, value] of [['scenario', scenario], ['page', page]]) {
+  document.getElementById(id).value = value
+  document.getElementById(id).onchange = event => { params.set(id, event.target.value); location.search = params.toString() }
+}
+const data = structuredClone({ bootstrap, snapshot, providers, runtime, diagnostics })
+let readFailure = scenario === 'read', soundBlocked = scenario === 'blocked', starts = 0, stops = 0, ready = 0
+const now = Date.now(), before = new Date(now - 2000).toISOString(), after = new Date(now - 1000).toISOString()
+data.runtime = { ...data.runtime, sessionId: 'fixture-status-session', state: 'RUNNING', player: { ...data.runtime.player, connected: true, ready: true },
+  collector: { ...data.runtime.collector, state: 'CONNECTED' } }
+data.diagnostics = { ...data.diagnostics, sessionId: data.runtime.sessionId, state: 'RUNNING', capturedAt: new Date(now).toISOString(), waiting: ['NO_PENDING_TASKS'] }
+const row = { sequence: 2, taskId: 'fixture-task', eventType: 'COMMENT', configVersion: 1, stage: 'FAILED', reason: 'SPEECH_FAILED', at: before, previousStageMs: 100, taskElapsedMs: 500 }
+if (['speech', 'recovered', 'model', 'playback'].includes(scenario)) {
+  row.reason = scenario === 'model' ? 'OVERALL_TIMEOUT' : scenario === 'playback' ? 'PLAYER_FAILED' : 'SPEECH_FAILED'
+  data.diagnostics.lastFailure = row
+  data.diagnostics.recent = [{ ...row, sequence: 1, stage: scenario === 'model' ? 'MODEL_STARTED' : scenario === 'playback' ? 'PLAYBACK_SENT' : 'SPEECH_STARTED', reason: 'NONE' }, row]
+  if (scenario === 'recovered') data.diagnostics.lastSpeechSuccessAt = after
+}
+if (['collector', 'connecting', 'reconnecting', 'ended'].includes(scenario)) {
+  data.runtime.mode = data.runtime.collector.mode = 'DOUYIN'
+  data.runtime.collector.state = { collector: 'FAILED', connecting: 'CONNECTING', reconnecting: 'RECONNECTING', ended: 'ENDED' }[scenario]
+  if (scenario === 'collector') { data.runtime.state = data.diagnostics.state = 'FAILED'; data.runtime.collector.lastError = 'PAGE_STRUCTURE_CHANGED'; data.runtime.player.ready = false }
+}
+if (scenario === 'template') {
+  data.diagnostics.recent = [{ ...row, eventType: 'GIFT', stage: 'SPEECH_COMPLETED', reason: 'NONE' }]
+  data.diagnostics.lastSpeechSuccessAt = before; data.runtime.collector.emitted = 1
+}
+if (scenario === 'start') { data.runtime.state = data.diagnostics.state = 'STOPPED'; data.runtime.sessionId = data.diagnostics.sessionId = ''; data.runtime.player.ready = false }
+function report() {
+  const root = document.documentElement
+  const titles = [...document.querySelectorAll('#fixture .health-summary h2')].map(el => el.textContent).join(' / ')
+  document.getElementById('evidence').textContent = `仅夹具：启动 POST ${starts}；停止 POST ${stops}；READY ${ready}；宽度 ${root.clientWidth}/${root.scrollWidth} ${root.scrollWidth <= root.clientWidth ? 'PASS' : 'FAIL'}；摘要 ${titles}`
+}
+// All routes are intercepted, including unexpected requests. There is no native-fetch fallback.
+window.fetch = async (url, init = {}) => {
+  const path = String(url).replace('/api/v1', '')
+  if (readFailure && (init.method ?? 'GET') === 'GET') return Response.json({}, { status: 503 })
+  if (path === '/sessions') { starts++; report(); return Response.json({ code: 'PROVIDER_UNAVAILABLE' }, { status: 422 }) }
+  if (path.endsWith('/stop')) { stops++; data.runtime.state = data.diagnostics.state = 'STOPPED'; data.runtime.player.ready = false; report(); return Response.json(data.runtime) }
+  const routes = { '/runtime': data.runtime, '/providers': data.providers, '/bootstrap': data.bootstrap, '/config': data.snapshot, '/runtime/diagnostics': data.diagnostics }
+  if ((init.method ?? 'GET') !== 'GET') return Response.json({ code: 'FIXTURE_UNSUPPORTED' }, { status: 422 })
+  return Object.hasOwn(routes, path) ? Response.json(routes[path]) : Response.json({}, { status: 404 })
+}
+class FixtureSocket {
+  static OPEN = 1
+  readyState = 1; closed = false
+  constructor() { setTimeout(() => this.onopen?.(), 0) }
+  emit(type, payload) { if (!this.closed) this.onmessage?.({ data: JSON.stringify({ schemaVersion: 1, messageId: crypto.randomUUID(), sessionId: data.runtime.sessionId, type, payload }) }) }
+  send(raw) {
+    const m = JSON.parse(raw)
+    if (m.type === 'PLAYER_HELLO') setTimeout(() => {
+      if (scenario === 'occupied') this.emit('PLAYER_REJECTED', { reason: 'PLAYER_ALREADY_ACTIVE' })
+      else if (scenario === 'disconnect') this.onclose?.()
+      else this.emit('PLAYER_LEASE', { playerId: m.payload.playerId, leaseGeneration: 1, heartbeatIntervalMs: 5000, expiresAt: new Date(Date.now() + 15000).toISOString() })
+    }, 0)
+    if (m.type === 'PLAYER_HEARTBEAT') this.emit('HEARTBEAT_ACK', { ...m.payload, expiresAt: new Date(Date.now() + 15000).toISOString() })
+    if (m.type === 'PLAYER_READY') { ready++; report() }
+  }
+  close() { this.closed = true }
+}
+window.WebSocket = FixtureSocket
+window.AudioContext = class {
+  state = 'suspended'
+  async resume() { if (soundBlocked) throw new Error('FIXTURE_BLOCKED'); this.state = 'running' }
+  async close() { this.state = 'closed' }
+}
+document.getElementById('recover').onclick = () => { data.diagnostics.lastSpeechSuccessAt = new Date().toISOString(); data.diagnostics.capturedAt = new Date().toISOString() }
+document.getElementById('read').onclick = () => { readFailure = !readFailure }
+document.getElementById('sound').onclick = () => { soundBlocked = false }
+document.getElementById('layout').onclick = report
+const { createApp } = await import('vue')
+const component = page === 'admin' ? (await import('../src/components/AdminPage.vue')).default : (await import('../src/components/StagePage.vue')).default
+createApp(component).mount('#fixture')
+setTimeout(report, 500)
+</script></body></html>

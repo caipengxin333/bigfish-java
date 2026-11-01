@@ -64,7 +64,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeLeave))
     <div v-if="latest" class="message warning"><p>本地基准 v{{ saved?.version }} → 最新保存 v{{ latest.version }}。保留草稿将以整份草稿覆盖最新配置，请先核对。</p><details><summary>查看最新保存内容</summary><pre>{{ JSON.stringify(copySettings(latest.settings), null, 2) }}</pre></details><div class="toolbar"><button :disabled="busy" @click="reconcile(true)">以最新版本保留草稿</button><button class="secondary" :disabled="busy" @click="reconcile(false)">采用最新配置，放弃草稿</button></div></div>
     <BackendRuntimePanel v-if="mode === 'real'" editing-config :room-draft="draft?.roomId" :config-pending="busy || needsReview || !!latest" @room-lock="roomLocked = $event" />
     <details v-else class="panel"><summary>高级调试：本地管理演示</summary><RuntimePanel :bootstrap="bootstrap" :saved-version="saved?.version ?? null" :settings="saved?.settings ?? null" /></details>
-    <form v-if="draft && saved" @submit.prevent="save">
+    <form id="configuration" v-if="draft && saved" @submit.prevent="save">
       <div class="form-title"><div><h2>基础配置</h2><p class="muted">已保存 v{{ saved.version }} · {{ dirty ? '有未保存修改' : '草稿与保存版本一致' }}</p><p class="muted">保存时间：{{ new Date(saved.updatedAt).toLocaleString('zh-CN') }}</p></div><button type="submit" :disabled="busy || needsReview || !!latest || !dirty || (mode === 'real' && roomDirty && roomLocked)">{{ busy ? '处理中…' : '保存配置' }}</button></div>
       <p v-if="needsReview" class="message warning">保存结果需要核对。请点击“读取最新版本”，草稿会保留。</p>
       <p id="room-help" class="muted">修改房间号后需要保存，停止并重新启动会话后生效。保存或刷新页面不会自动连接抖音。{{ mode === 'real' && roomLocked ? '会话运行或状态未知时，房间输入暂时锁定。' : '' }}</p>
