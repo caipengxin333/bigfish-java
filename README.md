@@ -1,98 +1,173 @@
 # BigFish Java · 直播互动工作台
 
-Java + Spring / Vue 的独立直播互动项目。原 `../AI-Vtuber` 保留用于功能参考。
+基于 Java、Spring Boot 和 Vue 的直播互动项目，将评论回复、礼物感谢、语音合成与浏览器角色舞台串成一条处理链路。管理页面用于配置角色、模型和音色，舞台页面用于播放语音、展示字幕和驱动嘴型。
 
-## 已完成与未完成
+**当前处于开发阶段，可以体验模拟消息 → DeepSeek 回复 → 阿里云语音 → 舞台播放。真实抖音消息采集尚未打通。** 不配置任何云服务凭据，也可以用模拟回复和本地测试音运行。
 
-已完成：两轮三个分支集成，SQLite 配置、会话启停/状态/模拟事件接口、有界调度、礼物模板、模拟采集回放、同源音频、独占播放租约，以及管理页与舞台的 HTTP/WebSocket 接线。DeepSeek 和阿里云 NLS 适配器已接入会话，可分别选择回复和语音服务；通过本地替身、超时/取消/重试/文件释放测试。
+## 功能与当前限制
 
-2026-11-01 已验证阿里云知柜（zhigui）真实短句合成、Java Sound 解码及 Safari 的 STARTED/COMPLETED 播放回执。适配器请求 PCM，再按实际字节数本地封装 WAV，解决云端 WAV 长度字段不一致导致的 NLS_INVALID_WAV。后续语音开发先同步 main 并阅读 [语音维护交接](docs/handoffs/phase2-speech.md)。
+| 能力 | 当前状态 |
+| --- | --- |
+| 管理页面 | 配置保存、会话启停、供应商状态、队列和错误诊断 |
+| 评论与礼物处理 | 评论调用模型，礼物默认使用感谢模板；支持去重、连击合并、优先级、队列容量和过期控制 |
+| DeepSeek | 已接入会话，支持模型目录检查和真实回复；也可选择 MOCK 回复 |
+| 阿里云 NLS | 已接入人声合成，已验证知柜（`zhigui`）短句合成与浏览器播放；当前使用手动配置的 Token |
+| 浏览器舞台 | 音频、字幕、音量驱动嘴型、独占播放端和播放回执；当前为原创 SVG 鱼形角色 |
+| 抖音采集 | 已有房间解析、连接和协议处理模块，缺少可用签名实现，主会话暂不开放 `DOUYIN` 来源 |
+| Live2D / 长时间运行 | Live2D 尚未接入；长期连续运行和 OBS 后台播放尚未完成验收 |
 
-尚未独立验收：真实 DeepSeek 供应商专项、真实抖音收消息、Live2D 和 OBS 长期后台播放。抖音已实现房间解析、连接提供器和协议处理，但缺少可实际使用的签名实现，主会话仍拒绝 DOUYIN。默认 Java MOCK + MOCK 回复 + 300ms 测试音，无 Key 也可运行；填写房间号或音色不会自动连接真实服务。bootstrap.mode=READY 只表示管理引擎就绪；speech 表示后端已配置阿里云凭据并启用云调用，真实验证状态须看 /providers，不能据此宣称已连通。
+舞台当前需要保持前台：切换到后台会静音并断开，返回后需重新连接和启用声音。填入房间号不会自动启用真实抖音采集。
 
-技术基线：Java 21、Spring Boot 3.5.11、Spring AI 1.1.8（库依赖，无启动时 Key 要求）、SQLite JDBC 3.49.1.0、Vue 3.5.22、Vite 7.1.12。Node 建议 22.12+ 或 24 LTS，Maven 3.9+。这里选择可验证的 3.5/1.1 稳定组合，未采用此前讨论过的 Boot 4 / Spring AI 2 组合。
+## 快速开始
 
-## 开发运行
+### 环境要求
 
-从仓库根目录打开两个终端：
+从源码启动或打包需要：
+
+| 工具 | 要求 |
+| --- | --- |
+| Java | JDK 21，`JAVA_HOME` 指向该安装目录 |
+| Maven | 3.9+，`mvn` 可在终端使用 |
+| Node.js / npm | Node.js 22.12+ 或 24，安装时附带 npm |
+| Shell | 下列 `.sh` 脚本需要 Bash，可在 macOS / Linux 环境使用 |
+
+后端使用 Spring Boot 3.5.11、Spring AI 1.1.8 和 SQLite；前端使用 Vue 3、TypeScript 和 Vite。无需单独安装 MySQL 或 Redis。完整依赖版本见 [Maven 配置](pom.xml) 和 [前端配置](frontend/package.json)。
+
+### 启动开发服务
+
+克隆仓库后，在仓库根目录打开两个终端。
+
+终端一，启动后端：
 
 ```bash
 ./scripts/dev-backend.sh
+```
+
+终端二，启动前端：
+
+```bash
 ./scripts/dev-frontend.sh
 ```
 
-默认页面 http://127.0.0.1:15173/admin ，舞台 http://127.0.0.1:15173/stage ，后端 http://127.0.0.1:18080 。依赖首次需联网下载，端口被占用不会自动关闭占用进程。
+首次运行需要联网下载依赖。前端脚本会在缺少 `node_modules` 时安装依赖；Maven 脚本使用项目内的 HTTPS 源与 `.cache/maven` 缓存。macOS 上未配置有效 `JAVA_HOME` 时，脚本会尝试定位已安装的 Java 21。
 
-Maven 脚本会在 macOS 上定位 Java 21，并使用本项目 HTTPS 源和 `.cache/maven`；不改全局 Maven、JAVA_HOME 或 npm 配置。
+| 入口 | 默认地址 |
+| --- | --- |
+| 管理页面 | [http://127.0.0.1:15173/admin](http://127.0.0.1:15173/admin) |
+| 角色舞台 | [http://127.0.0.1:15173/stage](http://127.0.0.1:15173/stage) |
+| 后端健康检查 | [http://127.0.0.1:18080/actuator/health](http://127.0.0.1:18080/actuator/health) |
 
-## 单 JAR 交付
+也可以用 IDEA 导入根目录 `pom.xml`，SDK 选择 21，运行 `cn.bigfish.BigfishApplication`，工作目录设为仓库根目录。前端在 `frontend` 目录执行 `npm ci`、`npm run dev`。脚本与 IDEA 启动方式二选一，避免重复占用后端端口。
+
+### 不配置 Key，先验证播放
+
+1. 打开管理页面，保持默认“真实后端接口”。这里表示连接本机 Java 服务；消息来源仍为 MOCK。
+2. 保持“MOCK 模拟回复”和“本地测试音”，点击“启动会话”。
+3. 打开舞台，依次点击“连接播放端”和“启用声音”。
+4. 保持舞台前台，点击舞台中的“发送模拟评论”或“发送模拟礼物”。应出现字幕、嘴型和约 300ms 的测试音，诊断出现 `STARTED`、`COMPLETED`。本地测试音不包含人声。
+5. 可点击“采集器连击回放”验证礼物累计数量与重复包处理；点击“停止会话”结束测试。
+
+新会话启动后，需要重新连接舞台并启用声音。`?transport=mock` 是独立的浏览器演示模式，验证 Java 后端时使用默认模式即可。
+
+## 配置 DeepSeek 与阿里云语音
+
+云服务凭据由**后端进程**读取。可以在 IDEA 的“运行 → 编辑配置 → BigfishApplication → 环境变量”中填写，或由终端、服务器进程管理器注入环境变量，修改后重启后端。
+
+| 环境变量 | 用途 |
+| --- | --- |
+| `BIGFISH_ALLOW_PAID` | 设为 `true` 才允许云服务调用，默认 `false` |
+| `BIGFISH_DEEPSEEK_API_KEY` | DeepSeek API Key，仅测试阿里云时可不填 |
+| `BIGFISH_ALIYUN_NLS_APP_KEY` | 阿里云智能语音交互 NLS 项目的 AppKey，仅测试 DeepSeek 时可不填 |
+| `BIGFISH_ALIYUN_NLS_TOKEN` | NLS Token，不是 DashScope API Key；当前过期后需更新并重启后端 |
+
+凭据不在网页填写，不保存在业务数据库中，也不应提交到 Git。仅在仓库中创建 `.env` 文件不会自动加载这些值。
+
+配置完成后：
+
+1. 在管理页查看服务状态。`MISSING` 表示缺少凭据，`UNVERIFIED` 表示尚未真实验证；状态轮询不调用云服务。
+2. 配置并保存模型名称。可以点击“检查 DeepSeek 模型目录”检查鉴权和模型是否存在，此操作不会生成回复。
+3. 使用阿里云时，选择并保存支持的音色，例如 `xiaoyun` 或 `zhigui`（知柜）。Edge-TTS 的 `zh-CN-...Neural` 名称不能直接使用。角色设定可要求每次回复一两句、尽量不超过 60 字。
+4. 停止旧会话，选择回复服务和语音服务后重新启动。先使用“MOCK 回复 + 阿里云 NLS”测试人声，再使用“DeepSeek + 阿里云 NLS”测试完整链路。
+5. 在前台舞台连接并启用声音，发送模拟评论验证模型回复，发送模拟礼物验证模板感谢。测试按钮可能触发所选云服务并产生费用；启动会话本身不发送模型或合成请求。
+
+当前 NLS 输入上限为 300 个 UTF-16 字符，主会话音频上限为 25 秒，超限会报错。模型调用整体期限为 20 秒，语音合成为 10 秒，重试受同一个期限约束。模型与语音失败分别展示错误码。
+
+详细说明：[DeepSeek](docs/providers/deepseek.md) · [阿里云 NLS](docs/providers/aliyun-nls.md) · [抖音采集限制](docs/providers/douyin.md)。
+
+## 打包与运行
+
+在仓库根目录执行：
 
 ```bash
 ./scripts/package.sh
 ./scripts/run.sh
 ```
 
-打包后页面为 http://127.0.0.1:18080/admin 和 /stage，服务在同一端口提供静态页面和 API。首次打包需联网，Node 只在构建时使用，运行已打包 JAR 只需 Java 21。
+打包脚本构建前端并将静态页面放入后端 JAR。运行后使用 [管理页面](http://127.0.0.1:18080/admin) 和 [角色舞台](http://127.0.0.1:18080/stage)，页面与 API 共用 `18080` 端口，不需要再启动 Vite。
 
-## 数据与配置
+产物为 `backend/target/bigfish-server-0.1.0-SNAPSHOT.jar`。复制到其他机器后，仅需 Java 21；在可写工作目录中运行：
 
-默认数据库 `runtime/app.db`，执行脚本时使用 worktree 下的绝对目录。worktree 的 `runtime/worktree.env` 只设置端口与 API 地址，脚本按本工作树自动确定数据路径，不放密钥。`runtime/` 与 `.cache/` 不入 Git。
+```bash
+java -jar bigfish-server-0.1.0-SNAPSHOT.jar
+```
 
-基础配置：backend/src/main/resources/application.yml（端口、数据库、日志等，改动一般重启）。业务配置：SQLite app_config 单行，版本 CAS 更新；前端 GET 后用 expectedVersion PUT，冲突返回 409。API Key / NLS Token 只通过后端环境变量注入，不在网页填写或存入业务 SQLite。修改凭据后重启后端，业务配置保存后用于新任务快照。
+服务器上的凭据仍通过 Java 进程环境注入。默认监听 `127.0.0.1:18080`，该命令不会将管理页面开放到公网。Node.js 和 Maven 仅用于源码构建。
 
-## 文档与任务
+## 数据与配置存储
 
-当前第三轮见 [后续开发计划](docs/phase3-plan.md)：三个现有工作树分别负责运行诊断与故障恢复、NLS Token 续期、真实抖音采集；主窗口统一 UI/API 与最终接线。另有 [GitHub 上传提示词](docs/prompts/github-publish.md)，仅发布已合并的 main。上一轮实现背景见 [真实服务接入计划](docs/phase2-plan.md)。
+| 内容 | 位置 / 生效方式 |
+| --- | --- |
+| 启动配置 | [application.yml](backend/src/main/resources/application.yml)；端口等启动参数修改后重启 |
+| 角色、模型、音色等业务配置 | 默认存入 SQLite `runtime/app.db`；网页保存后用于新任务，房间或服务类型切换需新建会话 |
+| 生成音频 | 默认在 `runtime/audio/` |
+| API Key / NLS Token | 由后端运行环境提供，修改后重启 |
+| 数据目录与端口覆盖 | `BIGFISH_DATA_DIR`、`BIGFISH_PORT`；开发前端可用 `BIGFISH_UI_PORT`、`BIGFISH_API_TARGET` |
 
-- [架构与范围](docs/architecture.md)
-- [HTTP 接口](docs/openapi.yaml)：配置、会话、模拟事件、回放及音频接口。
-- [事件格式](docs/event-schema.md)
-- [播放协议](docs/playback-protocol.md)：已实现模拟闭环。
-- [任务边界与合并](docs/task-boundaries.md)
-- [开新窗口指南](docs/开新窗口指南.md)
-- [后端任务](docs/prompts/backend.md)、[前端任务](docs/prompts/frontend.md)、[采集任务](docs/prompts/collector.md)
-- [验证记录](docs/validation.md)
+启动脚本默认使用仓库内 `runtime/` 的绝对路径；直接执行 `java -jar` 时，默认数据目录相对于当前工作目录。需要固定存储位置时设置 `BIGFISH_DATA_DIR`。SQLite 适合当前单实例运行方式。
 
-## 检查
+`runtime/`、`.cache/`、本机环境文件、IDE 配置及构建产物已配置 Git 忽略规则。多工作树开发使用的 `runtime/worktree.env` 仅存端口和 API 地址等非敏感配置。
+
+## 项目结构与处理流程
+
+```text
+bigfish-java/
+├── backend/       Java 后端：采集、调度、模型、语音、配置和播放控制
+├── frontend/      Vue 管理页面与角色舞台
+├── scripts/       开发启动、构建打包与检查脚本
+└── docs/          接口、服务接入、设计和开发记录
+```
+
+消息经过校验、去重和有界调度后，评论进入模型服务，礼物进入感谢模板，再交给语音服务生成音频。后端通过 WebSocket 通知舞台播放，舞台返回播放开始、完成或失败回执。
+
+开发时前后端分别运行；打包后为一个 Java 进程。采集器属于后端模块，无需单独部署一个采集器服务。
+
+## 开发验证
+
+后端测试：
 
 ```bash
 ./scripts/maven.sh test
-(cd frontend && npm run build)
-# 已启动打包后的服务时：
-node scripts/smoke.mjs
 ```
 
-联网权限受限时允许申请依赖下载权限；不得用关闭 TLS 验证解决问题。没有远端仓库配置，没有发布、部署或外发。
+前端测试与构建（在 `frontend` 目录执行）：
 
-## 第一轮联调操作
+```bash
+npm ci
+npm test
+npm run build
+```
 
-1. 打开 `/admin`，使用默认“真实后端接口”（不要切换浏览器本地 mock）。保持 MOCK 回复 + 本地测试音，点击“启动会话”。
-2. 打开 `/stage`，点击“连接播放端”→“启用声音”。
-3. 保持舞台前台，在舞台下方点击“发送模拟评论”或“发送模拟礼物”：看到短暂字幕/嘴型并听到测试音，诊断出现 STARTED、COMPLETED。
-4. 点击“采集器连击回放”：真实运行 Java MockCollector，输入累计礼物 1→3→3；字幕应感谢合计 3 个小心心，重复终包不增加数量。
-5. 点击“停止会话”：取消音频、清空队列、停止采集；Java 管理服务保持运行。新会话需重新连接舞台并启用声音。
+启动打包后的服务后，可在仓库根目录执行 `node scripts/smoke.mjs` 检查页面、健康状态和配置接口。该脚本会临时修改并恢复显示名称，应在独立测试实例上运行。真实云服务验收需另行配置凭据并显式触发，普通测试不代表线上服务已验证。
 
-开发：IDEA 导入根 pom.xml，Project SDK=21，运行 `cn.bigfish.BigfishApplication`；working directory 设仓库根目录，数据库默认 runtime/app.db。另在 frontend 执行 npm run dev。也可使用上面的脚本，避免本机全局 Maven 配置差异。
+## 更多文档
 
-单 JAR：只需启动 Java，采集器是后端模块，Vue 构建产物随 JAR 提供。三个 bigfish-worktrees 目录是开发副本，不是三个部署服务。
+- 接口与协议：[HTTP API](docs/openapi.yaml)、[事件格式](docs/event-schema.md)、[播放协议](docs/playback-protocol.md)。
+- 设计与前端：[架构设计](docs/architecture.md)、[前端与舞台](frontend/README.md)。
+- 开发协作：[任务边界与合并](docs/task-boundaries.md)、[后续开发计划](docs/phase3-plan.md)。
+- 历史记录：[交接记录](docs/handoffs/)、[验证记录](docs/validation.md)。这些文档保留对应阶段的背景与验收结果，具体改动可查 Git 提交历史。
 
-## 第二轮：使用真实模型和人声
+## 许可证与素材
 
-在 IDEA 的 BigfishApplication 运行配置中设置环境变量，再重启后端；只测试一种云服务时，仅填写对应服务凭据：
+本仓库尚未指定项目许可证，当前没有 `LICENSE` 文件；许可证需由维护者确定后补充。
 
-| 变量 | 用途 |
-|---|---|
-| `BIGFISH_ALLOW_PAID=true` | 明确启用云服务调用，默认 false |
-| `BIGFISH_DEEPSEEK_API_KEY` | DeepSeek 官方 API 凭据 |
-| `BIGFISH_ALIYUN_NLS_APP_KEY` | 阿里云智能语音交互 NLS 项目 AppKey |
-| `BIGFISH_ALIYUN_NLS_TOKEN` | NLS Token；不是 DashScope API Key，过期后需更换并重启 |
-
-1. `/admin` 查看服务状态。`MISSING` 表示缺凭据；`UNVERIFIED` 表示存在但未真实验证。状态轮询不请求云服务。
-2. 保存模型名称，可点“检查 DeepSeek 模型目录”验证鉴权和已保存模型是否在目录；此检查不生成回复，不能替代生成验收。
-3. 使用阿里云前，把音色改为 `xiaoyun`（或页面列出的其他支持音色）并保存。Edge 的 `zh-CN-...Neural` 标识不可直接使用。建议在角色设定中要求“每次只用一两句回答，尽量不超过 60 字”；NLS 最多 300 个 UTF-16 字符，主会话最多 25 秒音频，超长返回错误，不静默截断。
-4. 停止旧会话后选择回复服务与语音服务，再启动。可先 MOCK 回复 + ALIYUN_NLS，测试礼物模板人声；再 DEEPSEEK + ALIYUN_NLS，用模拟评论验证模型到音频的完整链路。每次测试按钮都可能触发所选真实云服务。
-5. 保持 `/stage` 前台，连接并启用声音，用舞台上的模拟评论/礼物按钮测试。启动会话本身不发送模型或合成请求。
-
-Token 自动刷新仅有扩展接口，尚未实现阿里云 CreateToken；当前凭据更新需重启。模型整体期限 20 秒，阿里云合成整体期限 10 秒，内部重试最多两次且共享期限。模型、合成失败显示独立错误码，不无限阻塞后续任务。抖音真实来源仍不可选择。
-
-第二轮集成结果和待验收项见 [集成交接](docs/handoffs/phase2-integration.md)，供应商配置细节见 [DeepSeek](docs/providers/deepseek.md)、[阿里云 NLS](docs/providers/aliyun-nls.md)、[抖音](docs/providers/douyin.md)。
+默认角色为本项目编写的 SVG 鱼形角色，测试音由代码生成。仓库未包含第三方 Live2D 模型或抖音签名脚本；后续引入时需分别记录来源与许可证。
