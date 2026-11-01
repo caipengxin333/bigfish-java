@@ -4,7 +4,7 @@ Java `SpeechPort` 适配器已接入主会话，可显式选择 ALIYUN_NLS；默
 
 ## 官方依据与固定选择
 
-核对日期：2026-10-30。
+TTS 文档核对日期：2026-10-30；Token 签发文档重新核对：2026-11-01。
 
 - [阿里云 NLS REST TTS](https://help.aliyun.com/zh/isi/user-guide/restful-api-3)：短文本最多 300 字符，超过可能截断；POST JSON 的 text 不做 URL 编码；成功响应可能标为 `audio/mpeg`，即使请求的是 WAV。
 - [音色及采样率](https://help.aliyun.com/zh/isi/user-guide/overview-of-speech-synthesis)：本轮仅开放下表已核对的 16 kHz 音色子集，不代表当前项目账户已购买或开通所有音色。
@@ -73,9 +73,75 @@ try {
 
 静态环境 Token 的初始状态是 **UNVERIFIED**，没有伪造的有效期；只有收到并验证成功 WAV 后才是 ACCEPTED，表示最近一次接受，不保证未来仍有效。HTTP 401/403 或 NLS Token 拒绝后标 REJECTED，后续请求不再发送；替换环境变量后重建适配器/重启。若后端知道确切签发到期时间，可用 `StaticNlsTokenProvider(token, expiresAt)` 提前本地拒绝过期。
 
-`RefreshingNlsTokenProvider` 是**经过本地测试的刷新框架**：接收 `Function<Duration, CompletionStage<Token>>` 签发回调，Token 必须包含到期时间；提前 30 秒刷新，单飞、最多 16 等待者、默认 3 秒刷新期限和失败 200ms 冷却。等待者有自己的期限，单个取消不取消其他等待者。旧 Token 的迟到拒绝不能废掉新 Token。
+## 第三轮：Token 签发与模式工厂
 
-**云端 CreateToken 回调未实现、未验证。** 若后续自动续期，需要独立后端 RAM AccessKey ID/Secret、最小 NLS 权限、安全保存/轮换决策，以及返回 ExpireTime 的实际签发调用。当前未引入 SDK，无依赖变更提案；不能照搬官方旧 Java SDK/JAXB 示例版本。集成选择 SDK 时需另行确定固定版本、Java 21 兼容性与许可证，再由主窗口修改 POM。
+2026-11-01 已实现 `AlibabaNlsTokenClient`，并接入原有 `RefreshingNlsTokenProvider`，**本地替身通过，真实 RAM 签发尚未验证**。不引入 SDK，不改 POM。原 zhigui 真实合成和 PCM→WAV 修复继续保留。
+
+依据 [官方 OpenAPI Token 文档](https://help.aliyun.com/zh/isi/user-guide/use-http-or-https-to-obtain-an-access-token)：固定 HTTPS `nls-meta.cn-shanghai.aliyuncs.com/`、cn-shanghai、CreateToken / 2019-02-28。使用 POST 表单及 POP RPC v1 HMAC-SHA1：参数排序、RFC3986 编码、UTC 秒级时间戳、新 UUID nonce。签名在请求体，不生成带签名的请求 URL，不跟随任何重定向；请求体也不得记录。官方 GET 固定假凭据向量与独立计算的 POST 向量均有测试。成功只解析真实 `Token.Id` 与 Unix 秒级 `Token.ExpireTime`，不假设 24 小时有效。
+
+签发客户端每次只发一次请求，不自动重试；最多 1 个在途请求，响应最多 16 KiB，连接最多 2 秒、包括完整响应体的总期限最多 3 秒；取消关闭订阅和该次 HttpClient。拒绝缺字段、重复字段、尾随 JSON、过期/异常期限与错误正文。签发失败与 NLS 合成失败分别有稳定代码：`TOKEN_AUTH_REJECTED`、`TOKEN_SIGNATURE_INVALID`、`TOKEN_CLOCK_SKEW`、`TOKEN_RESPONSE_INVALID`、`TOKEN_RATE_LIMITED`、`TOKEN_PROVIDER_UNAVAILABLE`、`TOKEN_REFRESH_TIMEOUT` 等，统一以 `NLS_` 前缀对外，不保留原始异常 cause 或供应商 Message。
+
+以下环境名是**供主窗口接线的命名约定**。内部工厂已经支持，当前 `ProviderServices` 仍显式使用静态 Token；仅设置 RAM 环境变量不会自动改变当前主会话。
+
+| 模式/变量 | 行为 |
+|---|---|
+| `BIGFISH_ALIYUN_NLS_TOKEN_MODE` | 省略/空值默认 STATIC；只接受 STATIC、RAM；未知值报 TOKEN_MODE_INVALID |
+| STATIC：`BIGFISH_ALIYUN_NLS_TOKEN` | 完全保留原用户配置；未知到期时间保持 null，不签发、不刷新，不读取 RAM 凭据 |
+| RAM：`BIGFISH_ALIYUN_ACCESS_KEY_ID` / `BIGFISH_ALIYUN_ACCESS_KEY_SECRET` | 独立后端 RAM 身份；缺失立即报 MISSING_CREDENTIALS，不回退到静态 Token 或其他账户 |
+| 两种模式：`BIGFISH_ALIYUN_NLS_APP_KEY` | 继续用于语音合成；需与签发身份所授权的 NLS 项目匹配 |
+
+本轮**不支持 STS SecurityToken、角色元数据或凭据链自动发现**，没有隐式账户选择。RAM AccessKey 的安全注入和权限由用户/管理员负责，适配器不创建账号、权限、密钥或购买服务；更换 RAM 凭据/模式须关闭旧实例并重建。不得复制主项目 IDEA 配置或把凭据填进网页。
+
+后端最小调用方式（主窗口实施，示例不会自行改变公共 DTO）：
+
+```java
+// 仅在用户明确选 ALIYUN_NLS 且服务器允许真实调用后创建；默认模式仍 STATIC。
+NlsTokenProviders.Handle tokenProvider = NlsTokenProviders.create(enabled, env::getProperty, mapper);
+AlibabaNlsSpeech speech;
+try {
+    speech = AlibabaNlsSpeech.create(enabled, audioDirectory, mapper,
+        env.getProperty("BIGFISH_ALIYUN_NLS_APP_KEY"), tokenProvider);
+} catch (RuntimeException error) {
+    tokenProvider.close();
+    throw error;
+}
+// 首次 synthesize 才按需 issue；构造、snapshot/status 均不访问云服务。
+NlsTokenProviders.Snapshot tokenState = tokenProvider.snapshot();
+// 语音成功仍须 release；取消任务仍 cancel；speech.close() 同时关闭 TokenProvider/client。
+```
+
+`AlibabaNlsSpeech.create(enabled, directory, mapper)` 的环境工厂也已委托 `NlsTokenProviders`，默认 STATIC 兼容原行为；当前主会话使用的是另一注入重载，主窗口需要主动替换其 StaticNlsTokenProvider 接线。请只将 snapshot 的允许字段映射到将来的管理响应，不序列化 Token、Handle、HTTP 请求或环境映射。快照仅包含模式、状态、真实到期/剩余时间、刷新结果/稳定错误码、尝试/成功时间及有界计数；STATIC 的到期/剩余时间为 null。
+
+### 刷新与恢复策略
+
+- 沿用原刷新器；接近到期（提前 30 秒，或不足本次请求期限 + 5 秒余量）时，在下一次 acquire 中启动后台刷新。空闲时不签发；轮询不会触发云请求。
+- 单飞、最多 16 个等待者、一个工作线程和最多一个有界排队位；每轮最多 3 秒，每个等待者有自己的更短期限。首个短等待者超时不会拖垮其他等待者；最后一个等待者取消/超时后中止签发。迟到回调按轮次身份丢弃。
+- 失败从 200ms 开始指数退避，最多 30 秒。没有定时自动重试风暴，下一次请求在冷却结束后才可重新签发。成功清除连续失败计数。
+- 只有网络、超时、429/服务暂不可用等明确临时错误可暂用旧 Token；旧 Token 必须未被拒绝，且剩余有效期严格大于本次剩余期限 + 5 秒。状态会显示 USING_VALID_CACHED 和刷新失败码。鉴权/签名/时钟/格式错误不采用该回退。
+- 缓存同时使用真实 ExpireTime、签发响应 Date 保守折算的有效期上界与单调经过时间；取较短有效期。Date 上界包含请求耗时和秒级精度余量，不改写对外 ExpireTime。已观察过期不会因系统时钟回拨复活；服务器 Date 与本机偏差超过 5 分钟报 TOKEN_CLOCK_SKEW，不自动修改时钟。较小幅度的本机慢钟也不会延长服务器已确定的有效期；无 Date 时依赖本机正常时钟。运行主机仍应同步系统时间。
+- 被合成服务拒绝的当前 Token 立即作废，即使刷新返回同一个值也不能重新发布；不同的新 Token 不会被旧请求的迟到拒绝作废。下次新任务获取新 Token；不会重播之前成功的音频。
+- 原合成重试在每次发送前重新 acquire，避免冷却期间过期后继续发旧 Token；仍保留最多两次、共同总 deadline，401/403 不重试该音频。PCM/WAV/非静音/时长/释放检查不变。
+
+### RAM 独立真实验收（默认关闭）
+
+本工作树当前未注入 RAM 凭据，本轮官方签发和合成调用次数均为 0。主项目既有静态 zhigui 成功记录不等于 RAM 已成功，也不等于全链路自动续期已经接线。
+
+用户在本工作树自己的 zsh 终端隐藏输入，不能将值放进聊天、命令字面量或 Git：
+
+```zsh
+cd '/Volumes/ZHITAI_MAC/创业项目测试/大肥鱼直播/bigfish-worktrees/frontend'
+read -rs 'BIGFISH_ALIYUN_NLS_APP_KEY?NLS AppKey（隐藏输入）: '
+read -rs 'BIGFISH_ALIYUN_ACCESS_KEY_ID?RAM AccessKey ID（隐藏输入）: '
+read -rs 'BIGFISH_ALIYUN_ACCESS_KEY_SECRET?RAM AccessKey Secret（隐藏输入）: '
+export BIGFISH_ALIYUN_NLS_APP_KEY BIGFISH_ALIYUN_ACCESS_KEY_ID BIGFISH_ALIYUN_ACCESS_KEY_SECRET
+export BIGFISH_ALIYUN_NLS_TOKEN_MODE=RAM
+source runtime/worktree.env
+./scripts/maven.sh -B -ntp -pl backend -Dtest=AlibabaNlsRamLiveTest \
+  -Dbigfish.nls.ramLive=true "-Dbigfish.nls.audioDirectory=$PWD/runtime/audio" test
+unset BIGFISH_ALIYUN_ACCESS_KEY_ID BIGFISH_ALIYUN_ACCESS_KEY_SECRET BIGFISH_ALIYUN_NLS_TOKEN_MODE
+```
+
+这次验收**最多一次 Token 签发和一条 zhigui 短句合成**，失败不重试，不靠反复调用等待过期。输出仅有次数、到期时间、耗时、字节数、duration、Java Sound 解码结果；文件在 finally 单个释放，不自动播放。默认整个测试套件同时跳过此入口和原静态真实入口。缺凭据时不要开启，不把跳过算成功。续期/时钟/竞态已通过可控时钟与本地替身，不做收费长测。当前主会话仍需主窗口接线和最终实测。
 
 ## 本机凭据配置与独立验证
 
@@ -90,7 +156,7 @@ read -rs 'BIGFISH_ALIYUN_NLS_TOKEN?NLS Token（隐藏输入）: '
 export BIGFISH_ALIYUN_NLS_APP_KEY BIGFISH_ALIYUN_NLS_TOKEN
 source runtime/worktree.env
 ./scripts/maven.sh -B -ntp -pl backend -Dtest=AlibabaNlsLiveTest \
-  -Dbigfish.nls.live=true "-Dbigfish.nls.audioDirectory=$BIGFISH_DATA_DIR/audio" test
+  -Dbigfish.nls.live=true "-Dbigfish.nls.audioDirectory=$PWD/runtime/audio" test
 unset BIGFISH_ALIYUN_NLS_APP_KEY BIGFISH_ALIYUN_NLS_TOKEN
 ```
 
