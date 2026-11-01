@@ -23,6 +23,9 @@ public final class DouyinCredentials {
         if (!expiresAt.isAfter(now)) throw new DouyinFailure(CREDENTIALS_EXPIRED);
     }
     Map<String, String> headers(DouyinRoomInput room) {
+        return headers(cookie, userAgent, room);
+    }
+    static Map<String, String> headers(String cookie, String userAgent, DouyinRoomInput room) {
         return Map.of("Cookie", cookie, "User-Agent", userAgent,
                 "Origin", "https://live.douyin.com", "Referer", room.pageUri().toString());
     }

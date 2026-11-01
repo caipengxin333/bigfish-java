@@ -20,11 +20,24 @@ public final class WebDouyinConnectionProvider implements DouyinConnectionProvid
     private final DouyinSigner signer;
     private final Clock clock;
     private final Duration signingTimeout;
+    private final DouyinGuestSession guest;
     private volatile Thread signingWorker;
     private final java.util.concurrent.atomic.AtomicLong signingAttempts = new java.util.concurrent.atomic.AtomicLong();
 
     public WebDouyinConnectionProvider(CredentialSource credentials, DouyinSigner signer) {
         this(credentials, signer, new DouyinRoomResolver(), Clock.systemUTC());
+    }
+    /** Ready to resolve from just a canonical room link/number; no credential environment is required. */
+    public static WebDouyinConnectionProvider guest() { return guest(new NativeDouyinSigner()); }
+    public static WebDouyinConnectionProvider guest(DouyinSigner signer) {
+        return guest(signer, new DouyinRoomResolver(), Clock.systemUTC());
+    }
+    static WebDouyinConnectionProvider guest(DouyinSigner signer, DouyinRoomResolver resolver, Clock clock) {
+        return new WebDouyinConnectionProvider(signer, resolver, clock);
+    }
+    private WebDouyinConnectionProvider(DouyinSigner signer, DouyinRoomResolver resolver, Clock clock) {
+        this.credentials = null; this.signer = signer; this.resolver = resolver; this.clock = clock;
+        this.signingTimeout = Duration.ofSeconds(10); this.guest = new DouyinGuestSession(resolver, clock);
     }
     WebDouyinConnectionProvider(CredentialSource credentials, DouyinSigner signer,
                                 DouyinRoomResolver resolver, Clock clock) {
@@ -33,6 +46,7 @@ public final class WebDouyinConnectionProvider implements DouyinConnectionProvid
     WebDouyinConnectionProvider(CredentialSource credentials, DouyinSigner signer,
                                 DouyinRoomResolver resolver, Clock clock, Duration signingTimeout) {
         this.credentials = java.util.Objects.requireNonNull(credentials); this.signer = signer;
+        this.guest = null;
         this.resolver = java.util.Objects.requireNonNull(resolver); this.clock = clock;
         this.signingTimeout = signingTimeout;
     }
@@ -44,13 +58,20 @@ public final class WebDouyinConnectionProvider implements DouyinConnectionProvid
     @Override public DouyinConnection resolve(String input, String expectedInternalRoomId) throws Exception {
         DouyinRoomInput requested = DouyinRoomInput.parse(input);
         DouyinCredentials current;
-        try { current = credentials.current(); }
-        catch (RuntimeException exception) { throw new DouyinFailure(CREDENTIALS_INVALID); }
-        if (current == null) throw new DouyinFailure(CREDENTIALS_MISSING);
-        current.validate(clock.instant());
-        // Do not touch the platform when receive cannot proceed. Room-only validation uses resolver directly.
-        requireSigner(signer);
-        DouyinRoom room = resolver.resolve(requested.webRoomId(), current);
+        DouyinRoom room;
+        if (guest != null) {
+            requireSigner(signer);
+            var access = guest.resolve(requested.webRoomId(), expectedInternalRoomId);
+            current = access.credentials(); room = access.room();
+        } else {
+            try { current = credentials.current(); }
+            catch (RuntimeException exception) { throw new DouyinFailure(CREDENTIALS_INVALID); }
+            if (current == null) throw new DouyinFailure(CREDENTIALS_MISSING);
+            current.validate(clock.instant());
+            // Do not touch the platform when receive cannot proceed. Room-only validation uses resolver directly.
+            requireSigner(signer);
+            room = resolver.resolve(requested.webRoomId(), current);
+        }
         if (expectedInternalRoomId != null && !expectedInternalRoomId.equals(room.internalRoomId())) {
             return DouyinConnection.ended(room.internalRoomId());
         }
@@ -123,6 +144,7 @@ public final class WebDouyinConnectionProvider implements DouyinConnectionProvid
         } catch (IllegalArgumentException exception) { throw new DouyinFailure(SIGNATURE_INVALID); }
     }
     public int inFlightRequests() { return resolver.inFlightRequests(); }
+    public long requestsStarted() { return resolver.requestsStarted(); }
     public int signingWorkers() { var worker = signingWorker; return worker != null && worker.isAlive() ? 1 : 0; }
     public long signingAttempts() { return signingAttempts.get(); }
     @Override public String toString() { return "WebDouyinConnectionProvider[redacted]"; }

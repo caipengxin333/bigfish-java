@@ -5,6 +5,7 @@ public final class DouyinFailure extends Exception {
     public enum Code {
         UNSUPPORTED_ROOM_URL(false), CREDENTIALS_MISSING(false), CREDENTIALS_EXPIRED(false),
         CREDENTIALS_INVALID(false), AUTH_REQUIRED(false), CHALLENGE_REQUIRED(false),
+        GUEST_COOKIE_MISSING(false), GUEST_COOKIE_INVALID(false), GUEST_ID_MISSING(false),
         REGION_RESTRICTED(false), PAGE_STRUCTURE_CHANGED(false), REDIRECT_REJECTED(false),
         RESPONSE_TOO_LARGE(false), HTTP_TIMEOUT(true), HTTP_UNAVAILABLE(true), RATE_LIMITED(false),
         SIGNER_UNAVAILABLE(false), SIGNER_CONFIGURATION_INVALID(false), SIGNATURE_EXPIRED(false), SIGNATURE_INVALID(false),

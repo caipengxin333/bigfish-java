@@ -17,7 +17,15 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Actual JDK HTTP/WebSocket, native signing and event delivery; all peer data is synthetic and loopback-only. */
 class NativeCollectorPipelineTest {
     @Test void nativeSigningThroughLocalTransportDeliversNormalizedEventsAckHeartbeatAndEnded() throws Exception {
-        byte[] html = DouyinRoomResolverTest.fixture("live").replace("7000000000000000001", "123").getBytes(StandardCharsets.UTF_8);
+        verifyPipeline(false);
+    }
+
+    @Test void roomOnlyGuestBootstrapDeliversEventsThroughActualLocalJdkTransport() throws Exception {
+        verifyPipeline(true);
+    }
+
+    private void verifyPipeline(boolean guest) throws Exception {
+        byte[] html = DouyinGuestSessionTest.guestPage("9001").replace("7000000000000000001", "123").getBytes(StandardCharsets.UTF_8);
         var httpCalls = new AtomicInteger();
         var events = new CopyOnWriteArrayList<LiveEvent>();
         var defaults = CollectorOptions.defaults();
@@ -25,16 +33,28 @@ class NativeCollectorPipelineTest {
                 defaults.reconnectBase(), defaults.reconnectMax(), Duration.ofMillis(100), Duration.ofSeconds(5), defaults.maxFrameBytes());
         try (var http = new DouyinRoomResolverTest.LocalHttp(exchange -> {
             httpCalls.incrementAndGet(); exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+            if (guest && exchange.getRequestURI().getPath().equals("/")) {
+                assertNull(exchange.getRequestHeaders().getFirst("Cookie"));
+                exchange.getResponseHeaders().add("Set-Cookie", "ttwid=synthetic-guest; Domain=.douyin.com; Path=/; HttpOnly; Secure");
+                byte[] home = "<title>Synthetic home</title>".getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(200, home.length); exchange.getResponseBody().write(home); exchange.close(); return;
+            }
+            if (guest) assertEquals("ttwid=synthetic-guest", exchange.getRequestHeaders().getFirst("Cookie"));
             exchange.sendResponseHeaders(200, html.length); exchange.getResponseBody().write(html); exchange.close();
         }); var peer = new JdkCollectorSocketTest.LoopbackPeer()) {
             var fetcher = new DouyinRoomResolver.JdkPageFetcher(Duration.ofSeconds(2), 4096);
-            var resolver = new DouyinRoomResolver(Clock.systemUTC(), (uri, headers) -> fetcher.get(http.uri(), headers));
-            var provider = new WebDouyinConnectionProvider(DouyinRoomResolverTest::credentials, DouyinSigners.load(), resolver, Clock.systemUTC());
+            var resolver = new DouyinRoomResolver(Clock.systemUTC(), (uri, headers) -> fetcher.get(http.uri().resolve(uri.getPath()), headers));
+            var provider = guest ? WebDouyinConnectionProvider.guest(DouyinSigners.load(), resolver, Clock.systemUTC())
+                    : new WebDouyinConnectionProvider(DouyinRoomResolverTest::credentials, DouyinSigners.load(), resolver, Clock.systemUTC());
             var transport = new JdkCollectorSocket(options, new CollectorDiagnostics(), Clock.systemUTC());
             try (var collector = new DouyinCollector(provider, options, Clock.systemUTC(), () -> new CollectorSocket() {
                 public void open(DouyinConnection connection) throws Exception {
                     assertEquals("123", connection.internalRoomId);
                     assertTrue(connection.endpoint.getRawQuery().contains("signature="));
+                    if (guest) {
+                        assertTrue(connection.endpoint.getRawQuery().contains("user_unique_id=9001&"));
+                        assertEquals("ttwid=synthetic-guest", connection.headers.get("Cookie"));
+                    }
                     // Test-only target substitution; production destination validation remains unchanged.
                     transport.openEndpoint(peer.uri(), connection.headers);
                 }
@@ -76,7 +96,7 @@ class NativeCollectorPipelineTest {
                 peer.send(2, true, WireFixtures.frame(false, false, WireFixtures.end(123)));
                 await(() -> collector.state() == CollectorPort.State.ENDED);
                 await(() -> collector.resources().released());
-                assertEquals(1, httpCalls.get()); assertEquals(1, resolver.requestsStarted());
+                assertEquals(guest ? 2 : 1, httpCalls.get()); assertEquals(guest ? 2 : 1, resolver.requestsStarted());
                 assertEquals(1, provider.signingAttempts()); assertEquals(1, collector.diagnostics().count(HANDSHAKE_ATTEMPT));
                 assertEquals(0, collector.diagnostics().count(RECONNECT));
                 collector.stop(); collector.stop();

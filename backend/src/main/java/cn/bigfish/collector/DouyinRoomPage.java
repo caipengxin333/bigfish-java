@@ -2,6 +2,7 @@ package cn.bigfish.collector;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.StreamReadConstraints;
+import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URLDecoder;
@@ -13,7 +14,7 @@ import static cn.bigfish.collector.DouyinFailure.Code.*;
 
 /** Independent parser of explicitly scoped roomStore hydration data; never executes page JavaScript. */
 final class DouyinRoomPage {
-    private static final ObjectMapper JSON = new ObjectMapper(JsonFactory.builder().streamReadConstraints(
+    private static final ObjectMapper JSON = new ObjectMapper(JsonFactory.builder().enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).streamReadConstraints(
             StreamReadConstraints.builder().maxNestingDepth(64).maxStringLength(2 * 1024 * 1024).build()).build());
     private static final Pattern SCRIPTS = Pattern.compile("<script\\b([^>]*)>(.*?)</script\\s*>", Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
     private static final Pattern RENDER = Pattern.compile("\\bid\\s*=\\s*['\"]RENDER_DATA['\"]", Pattern.CASE_INSENSITIVE);
@@ -51,6 +52,56 @@ final class DouyinRoomPage {
         if (text.matches("(?:验证码|安全验证)(?:\\s*[-—]\\s*抖音)?")) throw new DouyinFailure(CHALLENGE_REQUIRED);
         if (text.equals("地区限制")) throw new DouyinFailure(REGION_RESTRICTED);
         if (text.equals("登录抖音")) throw new DouyinFailure(AUTH_REQUIRED);
+    }
+
+    /** Read only an explicit visitor field in supported hydration, never an anchor ID or a generated fallback. */
+    static String guestId(String html) throws DouyinFailure {
+        checkGate(html);
+        var ids = new java.util.HashSet<String>();
+        var scripts = SCRIPTS.matcher(html);
+        while (scripts.find()) {
+            String source = scripts.group(2).strip();
+            try {
+                if (RENDER.matcher(scripts.group(1)).find()) {
+                    source = URLDecoder.decode(source.replace("+", "%2B"), StandardCharsets.UTF_8);
+                } else if (source.startsWith("self.__pace_f.push(")) {
+                    int begin = source.indexOf('['), end = source.lastIndexOf(']');
+                    if (begin < 0 || end <= begin) throw new DouyinFailure(PAGE_STRUCTURE_CHANGED);
+                    source = source.substring(begin, end + 1);
+                } else if (!source.startsWith("{")) continue;
+                collectGuestIds(JSON.readTree(source), ids, 0);
+            } catch (DouyinFailure failure) { throw failure; }
+            catch (Exception ignored) { throw new DouyinFailure(PAGE_STRUCTURE_CHANGED); }
+        }
+        if (ids.isEmpty()) throw new DouyinFailure(GUEST_ID_MISSING);
+        return ids.iterator().next();
+    }
+
+    private static void collectGuestIds(JsonNode node, java.util.Set<String> ids, int depth) throws Exception {
+        if (node == null) return;
+        if (depth > 24) throw new DouyinFailure(PAGE_STRUCTURE_CHANGED);
+        if (node.isObject()) {
+            for (var field : node.properties()) {
+                if (field.getKey().equals("user_unique_id")) {
+                    JsonNode value = field.getValue();
+                    String id = value.asText("");
+                    if ((!value.isTextual() && !value.isIntegralNumber()) || !id.matches("[1-9][0-9]{0,29}")) {
+                        throw new DouyinFailure(PAGE_STRUCTURE_CHANGED);
+                    }
+                    ids.add(id);
+                    if (ids.size() > 1) throw new DouyinFailure(PAGE_STRUCTURE_CHANGED);
+                } else collectGuestIds(field.getValue(), ids, depth + 1);
+            }
+        } else if (node.isArray()) {
+            for (JsonNode child : node) collectGuestIds(child, ids, depth + 1);
+        } else if (node.isTextual()) {
+            String source = node.textValue().strip();
+            // Next/pace stream chunks may prefix JSON with a numeric chunk identifier.
+            source = source.replaceFirst("^[0-9]{1,8}:", "");
+            if ((source.startsWith("{") || source.startsWith("[")) && source.contains("user_unique_id")) {
+                collectGuestIds(JSON.readTree(source), ids, depth + 1);
+            }
+        }
     }
 
     private static void scanStrings(JsonNode node, DouyinRoomInput request, List<DouyinRoom> found, int depth) throws Exception {

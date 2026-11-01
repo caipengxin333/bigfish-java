@@ -31,9 +31,11 @@ public final class DouyinCollectorProbe {
         var resolver = new DouyinRoomResolver();
         if (config.action.equals("resolve")) {
             try {
-                var room = resolver.resolve(config.room, credentials(env));
+                var room = config.credentialMode.equals("guest")
+                        ? new DouyinGuestSession(resolver, java.time.Clock.systemUTC()).resolve(config.room, null).room()
+                        : resolver.resolve(config.room, credentials(env));
                 System.out.println("mode=DOUYIN action=resolve state=" + (room.live() ? "LIVE" : "ENDED")
-                        + " roomResolved=true comments=0 gifts=0 receiveAttempted=false");
+                        + " credentials=" + config.credentialMode + " roomResolved=true comments=0 gifts=0 receiveAttempted=false");
                 return 0;
             } finally { System.out.println("httpRequests=" + resolver.requestsStarted() + " httpInFlight=" + resolver.inFlightRequests()
                     + " elapsedMs=" + (System.nanoTime() - started) / 1_000_000); }
@@ -41,9 +43,7 @@ public final class DouyinCollectorProbe {
         if (!"true".equals(env.apply("BIGFISH_DOUYIN_SIGNER_REVIEWED"))) throw new DouyinFailure(SIGNER_UNAVAILABLE);
         // Explicit opt-in is checked before loading user-provided executable extensions.
         var signer = DouyinSigners.load();
-        var provider = new WebDouyinConnectionProvider(() -> credentials(env), signer, resolver, java.time.Clock.systemUTC());
-        // Validate with precise errors before starting; the supplier is then re-evaluated on each attempt.
-        credentials(env);
+        var provider = provider(config, env, signer, resolver);
         var attempts = new AtomicInteger(); var comments = new LongAdder(); var gifts = new LongAdder(); var giftUnits = new LongAdder();
         var follows = new LongAdder(); var entrances = new LongAdder(); var likes = new LongAdder();
         var collector = new DouyinCollector(new DouyinConnectionProvider() {
@@ -87,6 +87,7 @@ public final class DouyinCollectorProbe {
             catch (IllegalStateException ignored) { /* JVM shutdown already started. */ }
             var d = collector.diagnostics();
             System.out.println("mode=DOUYIN action=receive terminal=" + finalState + " stopped=" + collector.state()
+                    + " credentials=" + config.credentialMode
                     + " connections=" + d.count(CollectorDiagnostics.Counter.CONNECTED)
                     + " comments=" + comments.sum() + " gifts=" + gifts.sum() + " giftUnits=" + giftUnits.sum()
                     + " follows=" + follows.sum() + " entrances=" + entrances.sum() + " likes=" + likes.sum()
@@ -112,13 +113,23 @@ public final class DouyinCollectorProbe {
         DouyinRoomInput.parse(room);
         String action = env.apply("BIGFISH_DOUYIN_PROBE_ACTION");
         if (!"resolve".equals(action) && !"receive".equals(action)) throw new DouyinFailure(PROBE_CONFIGURATION_INVALID);
+        String credentialMode = env.apply("BIGFISH_DOUYIN_CREDENTIAL_MODE");
+        if (credentialMode == null) credentialMode = "guest";
+        if (!"guest".equals(credentialMode) && !"external".equals(credentialMode)) throw new DouyinFailure(PROBE_CONFIGURATION_INVALID);
         int seconds = 60;
         try {
             String value = env.apply("BIGFISH_DOUYIN_PROBE_SECONDS");
             if (value != null) seconds = Integer.parseInt(value);
             if (seconds < 1 || seconds > 120) throw new IllegalArgumentException();
         } catch (IllegalArgumentException exception) { throw new DouyinFailure(PROBE_CONFIGURATION_INVALID); }
-        return new Config(room, action, seconds);
+        return new Config(room, action, seconds, credentialMode);
+    }
+    static WebDouyinConnectionProvider provider(Config config, Function<String, String> env,
+                                                DouyinSigner signer, DouyinRoomResolver resolver) throws DouyinFailure {
+        if (config.credentialMode.equals("guest")) return WebDouyinConnectionProvider.guest(signer, resolver, java.time.Clock.systemUTC());
+        // External credentials are an explicit diagnostic option, never silently read in guest mode.
+        credentials(env);
+        return new WebDouyinConnectionProvider(() -> credentials(env), signer, resolver, java.time.Clock.systemUTC());
     }
     static DouyinCredentials credentials(Function<String, String> env) throws DouyinFailure {
         String expiry = env.apply("BIGFISH_DOUYIN_CREDENTIALS_EXPIRES_AT");
@@ -130,7 +141,7 @@ public final class DouyinCollectorProbe {
         credentials.validate(Instant.now());
         return credentials;
     }
-    record Config(String room, String action, int seconds) {
+    record Config(String room, String action, int seconds, String credentialMode) {
         @Override public String toString() { return "ProbeConfig[redacted]"; }
     }
 }
