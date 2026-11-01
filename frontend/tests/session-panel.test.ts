@@ -22,7 +22,7 @@ export const createSessionControls = () => globalThis.__bigfishPanelControls;`
 const urlFor = (source: string) => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`
 const compiled = ts.transpileModule(script.content, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText
   .replace(/from ["']([^"']+)["']/g, (_match, specifier) => `from ${JSON.stringify(specifier === '../session-controls.ts'
-    ? urlFor(shim) : import.meta.resolve(specifier))}`)
+    ? urlFor(shim) : specifier.startsWith('.') ? new URL(specifier, componentUrl).href : import.meta.resolve(specifier))}`)
 const Panel = (await import(urlFor(compiled))).default
 
 async function render(data = structuredClone({ ...fixtures }), compact = false) {
@@ -48,7 +48,8 @@ test('actual admin panel disables unavailable source, preserves token/diagnostic
   assert.match(html, /后端暂未开放真实接收/)
   assert.match(html, /<option value="MOCK" selected>模拟采集/)
   assert.match(html, /Token 模式：STATIC/); assert.match(html, /当前阶段：会话未运行/)
-  assert.match(html, /启动不会自动保存表单/); assert.deepEqual(locks, [false])
+  assert.match(html, /启动不会自动保存表单/); assert.doesNotMatch(html, />启动会话<|<details[^>]* open/)
+  assert.match(html, /本浏览器启动选项/); assert.deepEqual(locks, [false])
 })
 test('actual stage panel renders live state and room, locks source and disables all simulation buttons', async () => {
   const data = structuredClone({ ...fixtures })
@@ -56,8 +57,8 @@ test('actual stage panel renders live state and room, locks source and disables 
     player: { ...data.runtime.player, connected: true, ready: true },
     collector: { ...data.runtime.collector, mode: 'DOUYIN', state: 'RECONNECTING', lastError: 'CONNECTION_CLOSED' } }
   const { html, locks } = await render(data, true)
-  assert.match(html, /select disabled aria-describedby="source-availability"/)
-  assert.match(html, /<option value="DOUYIN" selected>抖音直播/)
+  assert.doesNotMatch(html, /<select/) // Stage reads actual options; editing is centralized in admin.
+  assert.match(html, /当前消息来源：抖音直播/)
   for (const label of ['发送模拟评论', '发送模拟礼物', '采集器连击回放']) assert.match(html, new RegExp(`<button class="secondary" disabled>${label}`))
   assert.match(html, /当前运行房间：123456/); assert.match(html, /重连中/); assert.match(html, /尚未收到采集事件/)
   assert.match(html, /CONNECTION_CLOSED/); assert.match(html, /其他页面的未保存输入不会用于连接/)

@@ -30,6 +30,7 @@ export class BrowserAudio implements AudioPort {
   private abort: AbortController | null = null
   private frame = 0
   private timer: ReturnType<typeof setTimeout> | null = null
+  private startMonitor: ReturnType<typeof setInterval> | null = null
   private sequence = 0
   private loader: AudioLoader
   constructor(loader: AudioLoader = downloadAudio) { this.loader = loader }
@@ -39,6 +40,7 @@ export class BrowserAudio implements AudioPort {
     await this.context.resume()
     if (this.context.state !== 'running') throw new Error('PLAYBACK_BLOCKED')
   }
+  isEnabled() { return this.context?.state === 'running' }
   play(task: StageTask, callbacks: Parameters<AudioPort['play']>[1]) {
     this.stop()
     const context = this.context, sequence = this.sequence
@@ -68,7 +70,11 @@ export class BrowserAudio implements AudioPort {
       let started = false
       const startTime = context.currentTime
       const markStarted = () => {
-        if (!started && active() && context.state === 'running' && context.currentTime > startTime) { started = true; callbacks.started() }
+        if (!started && active() && context.state === 'running' && context.currentTime > startTime) {
+          started = true
+          if (this.startMonitor) clearInterval(this.startMonitor)
+          this.startMonitor = null; callbacks.started()
+        }
       }
       const values = new Float32Array(analyser.fftSize)
       const sample = () => {
@@ -92,6 +98,8 @@ export class BrowserAudio implements AudioPort {
       context.onstatechange = () => { if (active() && context.state !== 'running') fail('AUDIO_INTERRUPTED') }
       try { source.start() } catch { fail('PLAYBACK_BLOCKED'); return }
       this.timer = setTimeout(() => fail('PLAYBACK_TIMEOUT'), Math.ceil(buffer.duration * 1000) + 3000)
+      // Timers and the audio clock/onended, not animation frames, determine STARTED.
+      this.startMonitor = setInterval(markStarted, 50)
       this.frame = requestAnimationFrame(sample)
     })().catch(() => fail('PLAYBACK_BLOCKED'))
   }
@@ -100,6 +108,8 @@ export class BrowserAudio implements AudioPort {
     this.abort?.abort(); this.abort = null
     if (this.timer) clearTimeout(this.timer)
     this.timer = null; cancelAnimationFrame(this.frame)
+    if (this.startMonitor) clearInterval(this.startMonitor)
+    this.startMonitor = null
     if (this.context) this.context.onstatechange = null
     if (this.gain) { this.gain.gain.value = 0; this.gain.disconnect() }
     if (this.source) { this.source.onended = null; try { this.source.stop() } catch { /* already stopped */ } this.source.disconnect() }

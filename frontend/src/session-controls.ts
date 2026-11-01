@@ -67,13 +67,17 @@ export function createSessionControls(client = runtimeApi, configuration = api, 
   const canSimulate = computed(() => !busy.value && runtime.value?.state === 'RUNNING' &&
     runtime.value.mode === 'MOCK' && runtime.value.collector.mode === 'MOCK' && runtime.value.player.ready)
   const canStop = computed(() => !busy.value && !!runtime.value?.sessionId && runtime.value.state !== 'STOPPED')
+  let uncertainStart = false
   let revision = 0, disposed = false, pending: AbortController | undefined, timer: ReturnType<typeof setTimeout> | undefined
   const failure = (e: unknown) => e instanceof RequestError ? e.message : '操作失败，请刷新状态后核对。'
-  function begin() {
+  function begin(parent?: AbortSignal) {
     pending?.abort()
     const controller = new AbortController()
     pending = controller
-    return { version: ++revision, signal: controller.signal }
+    const cancel = () => controller.abort()
+    parent?.addEventListener('abort', cancel, { once: true })
+    if (parent?.aborted) cancel()
+    return { version: ++revision, signal: controller.signal, detach: () => parent?.removeEventListener('abort', cancel) }
   }
   const current = (version: number) => !disposed && version === revision
   function accept(value: RuntimeView) {
@@ -139,8 +143,66 @@ export function createSessionControls(client = runtimeApi, configuration = api, 
     } catch (e) { if (current(version)) { pending?.abort(); error.value = failure(e); runtime.value = null; diagnostics.value = null } }
     finally { if (current(version)) busy.value = false }
   }
+  // Used by the stage coordinator. It holds the same polling revision/busy gate
+  // as ordinary actions, so a late status response cannot replace the chosen session.
+  async function prepareSession(chosen: SessionSelection, parent?: AbortSignal, target?: string): Promise<RuntimeView> {
+    if (disposed || busy.value) throw new RequestError('http', '操作正在进行，请稍候。')
+    const { version, signal, detach } = begin(parent)
+    const ensure = () => { if (!current(version) || signal.aborted) throw new RequestError('network', '本次操作已取消。') }
+    busy.value = true; error.value = ''; notice.value = ''
+    try {
+      await read(version, signal); ensure()
+      let value = runtime.value!
+      if (target) {
+        if (value.sessionId !== target || value.state !== 'RUNNING') throw new RequestError('http', '原互动会话已停止或变化；恢复播放不会新建会话。', 'SESSION_MISMATCH')
+        return value
+      }
+      if (value.state === 'RUNNING' || value.state === 'STARTING') { uncertainStart = false; return value }
+      if (value.state === 'STOPPING') throw new RequestError('http', '后端仍在停止，请等待确认。')
+      if (uncertainStart) throw new RequestError('timeout', '上次启动结果仍未确认，本次只查询状态，未重复启动。请稍后核对后端。')
+      selection.value = { ...chosen }
+      if (startProblem.value) throw new RequestError('http', startProblem.value)
+      uncertainStart = true
+      try {
+        value = await client.start(chosen, signal); ensure(); uncertainStart = false; accept(value)
+      } catch (e) {
+        ensure()
+        const ambiguous = e instanceof RequestError && (['timeout', 'network'].includes(e.kind) || e.code === 'SESSION_ACTIVE')
+        if (!ambiguous) { uncertainStart = false; throw e }
+        // Exactly one read after an ambiguous POST; never retry the mutation.
+        value = await client.status(signal); ensure(); accept(value)
+        if (!['RUNNING', 'STARTING'].includes(value.state)) throw new RequestError('timeout', '启动结果未确认，已查询状态但未发现活动会话；不会重复发送启动请求。')
+        uncertainStart = false
+      }
+      return value
+    } finally { detach(); if (current(version)) busy.value = false }
+  }
+  async function stopSession(target?: string, parent?: AbortSignal): Promise<RuntimeView> {
+    const { version, signal, detach } = begin(parent)
+    const ensure = () => { if (!current(version) || signal.aborted) throw new RequestError('network', '本次操作已取消。') }
+    busy.value = true; diagnostics.value = null
+    try {
+      let value = await client.status(signal); ensure(); accept(value)
+      if (target && value.sessionId !== target) throw new RequestError('http', '后端会话已变化，本次未停止其他会话。', 'SESSION_MISMATCH')
+      if (value.state === 'STOPPED' && uncertainStart) throw new RequestError('timeout', '先前的启动请求仍未确认；本页已静音，但暂不能确认后端最终停止。')
+      if (value.sessionId && value.state !== 'STOPPED') {
+        const session = value.sessionId
+        value = await client.stop(session, signal); ensure()
+        if (value.sessionId !== session) throw new RequestError('http', '停止响应会话不一致，请核对后端。', 'SESSION_MISMATCH')
+        accept(value)
+        if (value.state === 'STOPPED') uncertainStart = false
+      }
+      return value
+    } finally { detach(); if (current(version)) busy.value = false }
+  }
+  async function verifySession(target: string): Promise<boolean> {
+    await refresh()
+    return runtime.value?.sessionId === target && runtime.value.state === 'RUNNING'
+  }
   async function poll() { await refresh(); if (!disposed) timer = setTimeout(poll, 1000) }
   function dispose() { disposed = true; ++revision; pending?.abort(); if (timer) clearTimeout(timer) }
   return { runtime, providers, bootstrap, saved, diagnostics, modelCheck, selection, busy, error, loadError, notice,
-    stopped, locked, availability, inconsistency, roomProblem, startProblem, canSimulate, canStop, refresh, action, poll, dispose }
+    stopped, locked, availability, inconsistency, roomProblem, startProblem, canSimulate, canStop, refresh, action, prepareSession, stopSession, verifySession, poll, dispose }
 }
+
+export type SessionControls = ReturnType<typeof createSessionControls>

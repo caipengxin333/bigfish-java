@@ -49,18 +49,21 @@ async function save() {
   } catch (e) { error.value = failure(e); needsReview.value = e instanceof RequestError && ['conflict', 'timeout', 'network'].includes(e.kind) }
   finally { busy.value = false }
 }
+function openStage(event: MouseEvent) {
+  if (busy.value || roomDirty.value || needsReview.value || latest.value) { event.preventDefault(); error.value = '请先保存或核对房间配置，再打开舞台。' }
+}
 function beforeLeave(event: BeforeUnloadEvent) { if (dirty.value) event.preventDefault() }
 onMounted(() => { void load(); window.addEventListener('beforeunload', beforeLeave) })
 onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeLeave))
 </script>
 <template>
   <main>
-    <div class="heading"><div><p class="eyebrow">CONTROL ROOM / 01</p><h1>让每一次互动，有序发生。</h1><p class="muted">配置、运行诊断与独立播放舞台</p></div><a class="button secondary" :href="pageUrl('stage')" target="_blank" rel="noopener">打开舞台 ↗</a></div>
+    <div class="heading"><div><p class="eyebrow">CONTROL ROOM / 01</p><h1>让每一次互动，有序发生。</h1><p class="muted">保存配置 → 打开舞台 → 开始互动</p></div><a class="button secondary" :href="pageUrl('stage')" @click="openStage" target="_blank" rel="noopener">打开舞台 ↗</a></div>
     <div class="toolbar"><a class="button secondary" :href="pageUrl('admin', mode === 'real' ? 'mock' : 'real')">{{ mode === 'real' ? '切换到本地 mock' : '切换到真实接口' }}</a><button class="secondary" :disabled="busy" @click="load">{{ busy ? '处理中…' : '读取最新版本' }}</button><span class="muted">{{ bootstrap ? (mode === 'mock' ? '本地演示可用' : `后端响应：${bootstrap.mode}`) : '运行信息未确认' }}</span></div>
     <div v-if="error" class="message error" role="alert">{{ error }}</div><div v-if="notice" class="message" role="status">{{ notice }}</div>
     <div v-if="latest" class="message warning"><p>本地基准 v{{ saved?.version }} → 最新保存 v{{ latest.version }}。保留草稿将以整份草稿覆盖最新配置，请先核对。</p><details><summary>查看最新保存内容</summary><pre>{{ JSON.stringify(copySettings(latest.settings), null, 2) }}</pre></details><div class="toolbar"><button :disabled="busy" @click="reconcile(true)">以最新版本保留草稿</button><button class="secondary" :disabled="busy" @click="reconcile(false)">采用最新配置，放弃草稿</button></div></div>
     <BackendRuntimePanel v-if="mode === 'real'" editing-config :room-draft="draft?.roomId" :config-pending="busy || needsReview || !!latest" @room-lock="roomLocked = $event" />
-    <RuntimePanel v-else :bootstrap="bootstrap" :saved-version="saved?.version ?? null" :settings="saved?.settings ?? null" />
+    <details v-else class="panel"><summary>高级调试：本地管理演示</summary><RuntimePanel :bootstrap="bootstrap" :saved-version="saved?.version ?? null" :settings="saved?.settings ?? null" /></details>
     <form v-if="draft && saved" @submit.prevent="save">
       <div class="form-title"><div><h2>基础配置</h2><p class="muted">已保存 v{{ saved.version }} · {{ dirty ? '有未保存修改' : '草稿与保存版本一致' }}</p><p class="muted">保存时间：{{ new Date(saved.updatedAt).toLocaleString('zh-CN') }}</p></div><button type="submit" :disabled="busy || needsReview || !!latest || !dirty || (mode === 'real' && roomDirty && roomLocked)">{{ busy ? '处理中…' : '保存配置' }}</button></div>
       <p v-if="needsReview" class="message warning">保存结果需要核对。请点击“读取最新版本”，草稿会保留。</p>

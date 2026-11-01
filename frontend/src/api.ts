@@ -2,7 +2,8 @@ import type { Bootstrap, ConfigSnapshot, Settings } from './contracts'
 
 export class RequestError extends Error {
   readonly kind: 'conflict' | 'timeout' | 'network' | 'invalid' | 'http'
-  constructor(kind: RequestError['kind'], message: string) { super(message); this.kind = kind }
+  readonly code: string
+  constructor(kind: RequestError['kind'], message: string, code = '') { super(message); this.kind = kind; this.code = code }
 }
 const integer = (v: unknown, min: number, max: number) => Number.isInteger(v) && Number(v) >= min && Number(v) <= max
 const string = (v: unknown, min: number, max: number) => typeof v === 'string' && v.length >= min && v.length <= max

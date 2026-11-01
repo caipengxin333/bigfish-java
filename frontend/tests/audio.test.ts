@@ -79,3 +79,15 @@ test('stop disconnects source and cancels animation; old onended cannot complete
   player.stop(); oldEnd(); frame()
   assert.deepEqual(events, ['STARTED', 'LEVEL']); assert.equal(FakeContext.latest.source!.stopped, true); assert.equal(frames.size, 0); player.dispose()
 })
+
+
+test('STARTED uses the audio clock timer when animation frames are paused in the background', async () => {
+  const player = new BrowserAudio(async () => new ArrayBuffer(44)), { events, hooks } = callbacks()
+  await player.enable(); player.play(task, hooks); await flush()
+  FakeContext.latest.currentTime = 0.1
+  // Never call frame(): a hidden tab may not receive requestAnimationFrame.
+  await new Promise(resolve => setTimeout(resolve, 80))
+  assert.deepEqual(events, ['STARTED'])
+  FakeContext.latest.source!.onended!()
+  assert.deepEqual(events, ['STARTED', 'COMPLETED']); player.dispose()
+})

@@ -165,3 +165,57 @@ test('diagnostic session mismatch is dropped and disposal cancels all reads with
   release(Response.json(fixtures.runtime)); await old
   assert.equal(f.controls.runtime.value?.sessionId, 'active')
 })
+
+
+test('stage prepare attaches an existing session without POST even when browser choices differ', async t => {
+  const f = fixture(); t.after(f.controls.dispose); running(f, 'DOUYIN')
+  const value = await f.controls.prepareSession({ mode: 'MOCK', conversationMode: 'MOCK', speechMode: 'LOCAL_TEST_TONE' })
+  assert.equal(value.mode, 'DOUYIN'); assert.equal(value.sessionId, 'active'); assert.deepEqual(posts(f), [])
+  await assert.rejects(f.controls.prepareSession({ mode: 'MOCK', conversationMode: 'MOCK', speechMode: 'LOCAL_TEST_TONE' }, undefined, 'old-session'), /原互动会话已停止或变化/)
+  assert.deepEqual(posts(f), [])
+})
+test('ambiguous start and SESSION_ACTIVE query the resulting session once, with no second POST', async t => {
+  for (const conflict of [false, true]) {
+    const f = fixture(); t.after(f.controls.dispose)
+    f.intercept(path => {
+      if (path !== '/sessions') return
+      running(f, 'MOCK')
+      return conflict ? Promise.resolve(Response.json({ code: 'SESSION_ACTIVE' }, { status: 409 }))
+        : Promise.reject(new RequestError('timeout', '请求超时'))
+    })
+    const value = await f.controls.prepareSession({ mode: 'MOCK', conversationMode: 'MOCK', speechMode: 'LOCAL_TEST_TONE' })
+    assert.equal(value.sessionId, 'active'); assert.equal(posts(f).length, 1)
+    assert.equal(f.calls.at(-1)?.path, '/runtime')
+  }
+})
+test('unresolved timeout stays read-only across later clicks and never retries a session mutation', async t => {
+  const f = fixture(); t.after(f.controls.dispose)
+  f.intercept(path => path === '/sessions' ? Promise.reject(new RequestError('timeout', '超时')) : undefined)
+  const options = { mode: 'MOCK', conversationMode: 'MOCK', speechMode: 'LOCAL_TEST_TONE' } as const
+  await assert.rejects(f.controls.prepareSession(options), /未确认/)
+  await assert.rejects(f.controls.prepareSession(options), /只查询状态/)
+  assert.equal(posts(f).length, 1)
+})
+test('stage prepare retains room/availability guards; stopped recovery does not create', async t => {
+  const f = fixture(); t.after(f.controls.dispose)
+  const options = { mode: 'DOUYIN', conversationMode: 'MOCK', speechMode: 'LOCAL_TEST_TONE' } as const
+  f.data.snapshot.settings.roomId = ''
+  await assert.rejects(f.controls.prepareSession(options), /填写并保存/)
+  f.data.snapshot.settings.roomId = '123456'; f.data.providers.douyin.enabled = false
+  await assert.rejects(f.controls.prepareSession(options), /暂未开放/)
+  await assert.rejects(f.controls.prepareSession(options, undefined, 'old'), /原互动会话/)
+  assert.deepEqual(posts(f), [])
+})
+test('stopping never targets a replacement session, and abort ignores a late creation response', async t => {
+  const f = fixture(); t.after(f.controls.dispose); running(f, 'MOCK')
+  await assert.rejects(f.controls.stopSession('old'), /未停止其他会话/); assert.deepEqual(posts(f), [])
+  f.data.runtime = structuredClone(fixtures.runtime)
+  let release!: (value: Response) => void
+  f.intercept(path => path === '/sessions' ? new Promise(resolve => { release = resolve }) : undefined)
+  const abort = new AbortController()
+  const start = f.controls.prepareSession({ mode: 'MOCK', conversationMode: 'MOCK', speechMode: 'LOCAL_TEST_TONE' }, abort.signal)
+  await new Promise(resolve => setImmediate(resolve))
+  abort.abort(); await assert.rejects(f.controls.stopSession(), /启动请求仍未确认/)
+  release(Response.json({ ...fixtures.runtime, sessionId: 'late', state: 'RUNNING' }))
+  await assert.rejects(start, /已取消/); assert.equal(f.controls.runtime.value?.state, 'STOPPED')
+})

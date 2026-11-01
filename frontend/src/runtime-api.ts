@@ -69,7 +69,7 @@ export function createRuntimeApi(fetcher: typeof fetch = fetch, timeout = 8000) 
       const data: unknown = await response.json()
       if (!response.ok && !(event && [400, 409, 429].includes(response.status) && validate(data))) {
         const code = object(data) && typeof data.code === 'string' ? data.code : ''
-        throw new RequestError('http', messages[code] ?? `操作失败（HTTP ${response.status}），请刷新状态后核对。`)
+        throw new RequestError('http', messages[code] ?? `操作失败（HTTP ${response.status}），请刷新状态后核对。`, Object.hasOwn(messages, code) ? code : '')
       }
       if (!validate(data)) throw new RequestError('invalid', '运行接口响应格式不符合契约。')
       return data
