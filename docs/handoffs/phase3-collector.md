@@ -3,6 +3,8 @@
 日期：2026-11-01；工作树 `bigfish-worktrees/collector`；分支 `feature/douyin-collector`。
 开工工作区干净，已按授权从 `105304d` 快进合入 main `e39ca19893cde16a27937eac30c415db11a726cb`。基线回归 140 项：139 通过、1 项真实 NLS 测试按默认条件跳过、0 失败/错误。
 
+交付前再次在干净工作区执行 `git merge --no-edit main`，合入 `55a6fa04758b86be5550af5fd1c3d07cbc560b3c`（主窗口 README 更新）；本分支合并提交 `e54610e97aa5ccc18b28f5390215f12898a97a28`。`git merge-base --is-ancestor main HEAD` 返回 0。同步后完整回归 149 项：148 通过、1 跳过、0 失败/错误。未修改 main、未推送；与最新 main 的差异仅在本任务授权目录和唯一 SPI 文件。
+
 用户本轮确认“目前还没有直播号，先写好代码，后面一起测试”。本轮不会访问随机直播间；真实接收证据待后续提供，不把本地测试写成真实成功。
 
 ## 签名来源收敛与依赖提案
@@ -62,6 +64,7 @@
 | `./scripts/maven.sh -B -ntp -pl backend -DskipTests compile` | BUILD SUCCESS |
 | `./scripts/maven.sh -B -ntp test`（本轮代码，16:53:47） | 149 项，148 通过、1 跳过，0 失败/错误；20.572 秒 |
 | `./scripts/maven.sh -B -ntp test`（原生重连测试后，16:56:09） | 149 项，148 通过、1 跳过，0 失败/错误；15.340 秒；其中 collector 67/67 通过 |
+| `./scripts/maven.sh -B -ntp test`（交付同步后，16:59:18） | BUILD SUCCESS，149 项，148 通过、1 跳过，0 失败/错误；16.901 秒；collector 67/67 通过，本地组合用例 0.036 秒 |
 | `./scripts/dev-backend.sh -B -ntp -Dspring-boot.run.main-class=cn.bigfish.collector.DouyinCollectorProbe` | 默认保护输出 `PROBE_DISABLED`，Java 退出 2，Maven 因此退出 1 / BUILD FAILURE（预期）；总启动检查 5.058 秒 |
 | `git diff --check` | 通过 |
 
