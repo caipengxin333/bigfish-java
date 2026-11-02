@@ -35,6 +35,8 @@ class DouyinSessionTest {
         public State state() { return state; }
     }
     static class Factory extends SessionCollectors {
+        Factory() { super(); }
+        Factory(java.time.Clock clock) { super(ignored -> null,clock); }
         int mockCalls, douyinCalls;
         Controlled current;
         Predicate<String> binding;

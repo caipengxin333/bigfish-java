@@ -5,6 +5,7 @@ import cn.bigfish.collector.DouyinFailure;
 import cn.bigfish.configuration.ConfigStore;
 import cn.bigfish.configuration.ProviderServices;
 import cn.bigfish.configuration.SessionCollectors;
+import cn.bigfish.configuration.DouyinCredentialSettings;
 import cn.bigfish.contract.*;
 import jakarta.annotation.PreDestroy;
 import java.nio.charset.StandardCharsets;
@@ -30,6 +31,7 @@ public final class SessionService {
     private final SessionCollectors collectors;
     // Keep the retired handle until ALL resources exit. Never create an unbounded list of old runs.
     private Run run;
+    private DouyinCredentialSettings.Lease credentialLease;
     private static final class Run {
         final String sessionId, mode, requestedRoom;
         SessionCollectors.Handle handle;
@@ -60,14 +62,18 @@ public final class SessionService {
             try { room=DouyinRoomInput.parse(settings.roomId()).webRoomId(); }
             catch (DouyinFailure failure) { throw new SessionException("DOUYIN_"+failure.code().name(),422); }
         }
-        SpeechPort selected=providers.speech(request.speechMode(),settings.voice());
-        // ensureReleased ran above. A failed new engine start must not display the retired source.
-        run=null;
-        try { engine.start(request.mode(),request.conversationMode() == StartSessionRequest.ConversationMode.DEEPSEEK,selected,request.speechMode().name()); }
-        catch (IllegalStateException error) { throw new SessionException("PROVIDER_UNAVAILABLE", 503); }
-        // Empty source waits for an explicit replay; starting a session never invents viewer messages.
-        startCollector(request.mode(),room,new byte[0]);
-        return status();
+        try { credentialLease=collectors.settings().acquire(DouyinCredentialSettings.Use.INTERACTION); }
+        catch(DouyinCredentialSettings.Failure failure) { throw new SessionException(failure.code,failure.status); }
+        try {
+            SpeechPort selected=providers.speech(request.speechMode(),settings.voice());
+            // ensureReleased ran above. A failed new engine start must not display the retired source.
+            run=null;
+            try { engine.start(request.mode(),request.conversationMode() == StartSessionRequest.ConversationMode.DEEPSEEK,selected,request.speechMode().name()); }
+            catch (IllegalStateException error) { throw new SessionException("PROVIDER_UNAVAILABLE", 503); }
+            // Empty source waits for an explicit replay; starting never invents viewer messages.
+            startCollector(request.mode(),room,new byte[0]);
+            return status();
+        } finally { releaseCredentialsIfIdle(); }
     }
     public synchronized RuntimeView stop(String sessionId) {
         if (!engine.status().sessionId().equals(sessionId)) throw new SessionException("SESSION_MISMATCH", 409);
@@ -126,7 +132,7 @@ public final class SessionService {
     }
     @Scheduled(fixedDelay = 250)
     public synchronized void reconcile() {
-        reconcileState();
+        reconcileState(); releaseCredentialsIfIdle();
     }
     private CollectorPort.State reconcileState() {
         if (run == null) return CollectorPort.State.STOPPED;
@@ -138,12 +144,17 @@ public final class SessionService {
             if (state==CollectorPort.State.FAILED) engine.collectorFailed(run.sessionId);
             else engine.stop(run.sessionId);
             retire(state);
+        } else if (engine.status().state()==RuntimeEngine.State.RUNNING && run.mode.equals("DOUYIN")
+            && credentialLease!=null && credentialLease.validation().equals("CREDENTIALS_EXPIRED")) {
+            run.open.set(false); run.startupError="CREDENTIALS_EXPIRED";
+            engine.collectorFailed(run.sessionId); retire(CollectorPort.State.FAILED);
         } else if (engine.status().state()!=RuntimeEngine.State.RUNNING) retire(CollectorPort.State.STOPPED);
         // Capture a single source observation; do not mix a later terminal observation with RUNNING.
         return run.terminal==null ? state : run.terminal;
     }
     public synchronized RuntimeView status() {
         var collectorState=reconcileState();
+        releaseCredentialsIfIdle();
         var s = engine.status(); var config = configs.snapshot().settings(); var p = s.playback();
         int capacity = config.synthesisQueueCapacity();
         var d = run == null || run.handle == null ? null : run.handle.diagnostics();
@@ -178,6 +189,13 @@ public final class SessionService {
         long until=System.nanoTime()+250_000_000L;
         while (!run.handle.released().getAsBoolean() && System.nanoTime()<until && !Thread.currentThread().isInterrupted())
             LockSupport.parkNanos(1_000_000L);
+        releaseCredentialsIfIdle();
+    }
+    private void releaseCredentialsIfIdle() {
+        var state=engine.status().state();
+        if(credentialLease==null || state!=RuntimeEngine.State.STOPPED && state!=RuntimeEngine.State.FAILED) return;
+        if(run!=null && run.handle!=null && !run.handle.released().getAsBoolean()) { credentialLease.stopping(); return; }
+        credentialLease.close(); credentialLease=null;
     }
     private void ensureReleased() {
         if (run!=null && run.handle!=null && !run.handle.released().getAsBoolean()) throw new SessionException("COLLECTOR_STOPPING",409);

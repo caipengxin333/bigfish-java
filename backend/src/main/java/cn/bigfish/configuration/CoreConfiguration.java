@@ -2,6 +2,7 @@ package cn.bigfish.configuration;
 
 import cn.bigfish.conversation.*;
 import cn.bigfish.management.RuntimeEngine;
+import cn.bigfish.management.DouyinConnectionChecks;
 import cn.bigfish.management.diagnostics.GiftTraceLog;
 import cn.bigfish.playback.*;
 import cn.bigfish.speech.LocalTestSpeech;
@@ -17,7 +18,11 @@ import org.springframework.web.socket.config.annotation.*;
 @Configuration
 @EnableScheduling
 public class CoreConfiguration {
-    @Bean SessionCollectors sessionCollectors(Environment env, Clock runtimeClock) { return new SessionCollectors(env::getProperty,runtimeClock); }
+    @Bean DouyinCredentialSettings douyinCredentialSettings(Environment env,Clock clock) { return new DouyinCredentialSettings(env::getProperty,clock); }
+    @Bean SessionCollectors sessionCollectors(DouyinCredentialSettings settings, Clock runtimeClock) { return new SessionCollectors(settings,runtimeClock); }
+    @Bean DouyinConnectionChecks douyinConnectionChecks(SessionCollectors collectors,Clock clock) {
+        return new DouyinConnectionChecks(collectors.settings(),collectors::check,clock);
+    }
     @Bean Clock runtimeClock() { return Clock.systemUTC(); }
     @Bean AudioAssets audioAssets(@Value("${bigfish.data-dir}") String root, Clock clock) throws Exception {
         return new AudioAssets(Path.of(root,"audio"),clock);
