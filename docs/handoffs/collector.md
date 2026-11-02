@@ -1,4 +1,57 @@
-# external Cookie 与自动访客上下文交接（2026-11-02，本轮）
+# 首次 external 真实礼物接收成功（日志时间 2026-11-03 00:14–00:15 +08:00）
+
+**本次使用用户授权的 Safari 登录字段 Cookie，实际收到 65 条 WebcastGiftMessage，全部解析成功；连击去重 11 条后，54 条 GIFT 完成归一化并送达独立本地 sink。** 下方上一轮“真实 external / 真实礼物未验证”是历史状态，本节更新为“真实礼物采集到 sink 已验证”；没有验证黄色粉丝团心心的具体礼物名称、主会话业务接纳或感谢语音播出。
+
+## 范围、授权和凭据处理
+
+- 用户反馈当前房间有很多人点亮粉丝团黄色心心，要求再测；随后明确要求 **不要游客模式，使用登录 Cookie**。本轮没有执行 guest probe，也没有发送评论、点赞、关注或礼物。房间仍为用户指定的 999146174230。
+- 开工 pwd / branch / status 正确且干净，main 仍是 be628e125caa855ba708f6222aa5cb42171658ee；git merge --no-edit main 返回 Already up to date，祖先检查通过。实际采集实现为 80d4b213e6afa0ee599b4fb8866c359246665030，验证前 HEAD b9dc658e12720b9b4306ca516392788b6c1591f7。本轮只更新本文，本地提交 SHA 见任务最终回复。
+- Safari 文稿请求由服务工作线程响应，检查器没有该请求的 Cookie；同一页面在 live.douyin.com 发出的 /webcast/room/web/enter/ HTTP 请求中有 Cookie 与 UA。通过开发者工具核对，Cookie 面板存在登录字段。浏览器 UI 观察和字段存在仍不是独立的平台登录校验。
+- 工具的长文本可访问结果仅提供前 512 字符，不能把它当完整 Cookie。使用该真实请求的“拷贝为 cURL”转移完整内容；**没有执行复制的 cURL 或其中的签名 URL**，仅在本机内存解析 Cookie 与 User-Agent。UA 与同一浏览器的文稿请求一致；没有取管理页 UA、没有随机生成访客 ID。
+- Computer Use 拒绝了终端应用操作，未通过其他终端绕过。改用 /tmp/bigfish_external_memory_probe.py 的一次性本机输入页：只监听 127.0.0.1 随机端口，随机路径、Host/Origin 校验、请求大小上限、单次 POST、5 分钟等待上限；无访问日志、无第三方资源、输入遮蔽，接收后关闭监听器。此辅助脚本不进入项目，不是新增的管理配置 API 或常驻服务。其语法及人工 cURL 解析检查通过。
+- 完整请求只在剪贴板、浏览器临时输入框和辅助进程内存短暂存在。只取指定站点初始化请求的 Cookie/UA，设 10 分钟本地使用截止时间，经子进程环境传入既有 probe；未设置手工 visitor，自动从携带同一 Cookie/UA 的页面取得。Cookie 未写入命令行、文件、Git、日志或截图；未读取浏览器数据库/钥匙串。
+- 提交后清除了剪贴板中的请求内容，关闭本轮临时窗口和附属检查器，重置工具运行时；一次性接收器和 probe 已退出，进程内凭据释放。没有修改或停止主窗口服务，没有调用 DeepSeek/NLS。
+
+## 本次真实结果与请求账本
+
+入口仍是本工作树 ./scripts/dev-backend.sh -B -ntp -Dspring-boot.run.main-class=cn.bigfish.collector.DouyinCollectorProbe；显式设置 CREDENTIAL_MODE=external、LIVE_PROBE=true、SIGNER_REVIEWED=true、PROBE_SECONDS=60、PROBE_MAX_ATTEMPTS=1、ALLOW_PAID=false。Cookie/UA/本地期限仅作为进程环境注入，visitor 留空。先 resolve，确认 LIVE 后仅执行一次 receive，没有延长或重复测试。
+
+| 项目 | 实际结果 |
+| --- | --- |
+| external resolve | LIVE；HTTP 1，2540 ms，httpInFlight=0；00:14:40 +08:00 命令结束 |
+| external receive | 00:14:42–00:15:43 +08:00；60 秒预算含初始化，elapsedMs=60285；generation=1；HTTP 1、签名 1、WSS 尝试/成功各 1 |
+| 完整帧/协议 | ASSEMBLY / QUEUE / PUSH / PAYLOAD / DECOMPRESS / RESPONSE / MESSAGE_LIST 各 163 成功；ENVELOPE 589；UNKNOWN_TYPE 330，具名统计，与损坏区分 |
+| 礼物原始 method / 解析 | **WebcastGiftMessage=65，giftParsed=65，giftParseFailed=0** |
+| 礼物归一化与派发 | **giftDuplicates=11（DUPLICATE_COMBO），NORMALIZE OK=54，ENQUEUED=54，giftSinkReturned=54，giftUnits=54**；giftNormalizeFailed / giftQueueDropped / giftSinkFailed 全部 0 |
+| 其他事件 | COMMENT sink=55（method=58，重复消息 ID=3）；ENTRANCE=111；LIKE=19；FOLLOW=2（Social method=6，非关注动作不计作关注事件） |
+| Fansclub | WebcastFansclubMessage=27，仍按未知类型具名统计，未擅自转为 GIFT；本次真实礼物证据来自独立的 WebcastGiftMessage |
+| ACK / 心跳 / 故障 | ACK_HEADER=163，ACK 成功=163，heartbeat=6；MALFORMED=0，duplicate 总数=14，reconnect=0，unattributedFailures=0，inboundOmittedKeys=0，lastError 空 |
+| 停止释放 | CONNECTED → STOPPED；sourceThreads / dispatchThreads / queuedEvents / attachedTransports / httpInFlight / signingWorkers 全部 0；两个 probe 退出码均 0 |
+| 凭据证据 | EXTERNAL、LOCAL_VALID、loginFields=PRESENT、visitorSource=PAGE、platformLogin=UNVERIFIED；没有打印真实 Cookie、UA、visitor、昵称、正文或完整包 |
+
+Java 对抖音实际合计 **HTTP 2 次、WSS 1 次**；Safari 本轮访问及重载的页面、初始化/资源请求另计，未完整测量，不能称本轮总网络只有 2 次。日志仅保存既有脱敏诊断，位于 /tmp/bigfish-external-auth-retest.log，不提交原日志。
+
+以下为真实最终计数摘录（不含用户标识或凭据）：
+
+```text
+credentials=EXTERNAL credentialValidation=LOCAL_VALID loginFields=PRESENT visitorSource=PAGE platformLogin=UNVERIFIED
+giftMethod=65 giftParsed=65 giftParseFailed=0 giftNormalizeFailed=0 giftDuplicates=11 giftQueueDropped=0 giftSinkReturned=54 giftSinkFailed=0 unattributedFailures=0
+comments=55 gifts=54 giftUnits=54 follows=2 entrances=111 likes=19 ack=163 heartbeat=6 malformed=0 reconnect=0
+sourceThreads=0 dispatchThreads=0 queuedEvents=0 attachedTransports=0 httpInFlight=0 signingWorkers=0
+```
+
+## 已确认结论、边界与主窗口下一步
+
+1. **已有原生 Java signer / provider / GiftMessage 解析器在本次 external 会话下可收到真实礼物，并通过归一化、去重和本地 sink。** 本次没有修改字段、ACK/心跳、签名或引入 im/fetch，不能再把当前症状描述为“Java 完全不支持 GiftMessage”。
+2. 同一网页房间此前 guest 窗口 Gift=0，本次 external Gift=65，结合用户同期报告有人点亮粉丝团，支持优先把主会话接到已验证的完整 external 凭据链路。但两次采集不在同一时段、未同时抓浏览器业务帧，**尚不能严格证明 Cookie 是此前所有漏收的唯一原因，或所有游客连接都不能收礼物**。
+3. 计数没有记录礼物名称/ID或保存 payload，不能把 54 条 GIFT 全部认作“黄色心心”，也不能把 Fansclub 的 27 条认作赠送记录。11 条重复累计包已按既有规则过滤；本次没有人工核对各用户赠送数量，完整真实连击数量对账仍待验收。
+4. SINK_RETURNED 只表示独立接收回调返回，**没有操作主会话，也没有验证感谢语音**。主窗口应按下节接线提案支持 visitor 自动解析和后端 external 配置，并在用户许可的维护时机生效；不能复用本测试的已释放凭据、重新填写 historical visitor 或把本次结果伪装成主会话已切换成功。
+5. 需要继续在主会话观察 credentials=EXTERNAL 与 gift_trace：Gift method → parse → normalize → SINK_RETURNED → 业务 RECEIVED/接纳或拒绝 → 模板/语音/播放回执。无需为验收要求用户重复购买礼物；不因一轮成功承诺长期完整性、登录有效期、关播或重连稳定性。
+6. 本轮产品代码无变化，未重复运行完整单元测试；上一轮 108 项 collector 与 295 项后端结果保持各自归属。本轮验证为真实 external probe、临时辅助脚本的语法/人工解析检查及 git diff --check，不将 mock 数量混入真实数据。只本地文档提交，不推送、不联系其他窗口。
+
+---
+
+# external Cookie 与自动访客上下文交接（2026-11-02，上一实现轮）
 
 **采集层 external 接入已完善并通过离线验证；真实 external 登录上下文尚未验证，真实礼物待验收，不能宣称礼物漏收已经修复。** 页面配置 API、后端配置保存及 SessionCollectors 接线不在本窗口修改范围。
 
