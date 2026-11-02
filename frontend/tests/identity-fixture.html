@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>抖音身份 · 明确 MOCK 验收</title><link rel="stylesheet" href="/src/style.css">
+<style>body{padding:16px;max-width:1100px;margin:auto}output{display:block;margin:1rem 0}</style>
+<h1>抖音身份：仅本地界面演练</h1><p>真实 Vue 组件，身份服务为 mock。所有 fetch 请求被阻止；禁止填写真实凭据。</p>
+<button id="layout">检查布局和输入清理</button><output id="evidence"></output><div id="identity"></div>
+<script type="module">
+import { createApp } from 'vue'
+import Panel from '../src/components/DouyinIdentityPanel.vue'
+window.fetch=()=>{throw new Error('Identity fixture blocks all network requests')}
+createApp(Panel,{demo:true,locked:false,roomId:'123456',roomPending:false}).mount('#identity')
+document.getElementById('layout').onclick=()=>{
+  const root=document.documentElement, input=document.querySelector('input[type=password]')
+  document.getElementById('evidence').textContent=`宽度 ${root.clientWidth}/${root.scrollWidth} ${root.clientWidth===root.scrollWidth?'PASS':'FAIL'}；敏感输入 ${!input||input.value.length===0?'已清空':'仍有未提交内容（不回显）'}`
+}
+</script></html>
