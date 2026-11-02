@@ -104,13 +104,14 @@ class DouyinConnectionChecksTest {
             assertThat(checks.status(id).reason()).isEqualTo("CHECK_START_FAILED"); assertThat(checks.status(id).toString()).doesNotContain("private-");
         }
     }
-    @Test void activeInteractionBadRevisionAndMissingIdentityNeverAllocateCheck() {
+    @Test void activeInteractionBadRevisionAndExpiredIdentityNeverAllocateCheck() {
         try(var checks=new DouyinConnectionChecks(settings,s -> { throw new AssertionError("must not allocate"); },clock)) {
             try(var lease=settings.acquire(Use.INTERACTION)) { assertThatThrownBy(() -> start(checks)).hasMessage("SESSION_ACTIVE"); }
             assertThatThrownBy(() -> checks.start("stale","123",Duration.ofSeconds(1))).hasMessage("CREDENTIAL_CONFIG_CONFLICT");
             assertThatThrownBy(() -> checks.start(settings.status().revision(),"123",Duration.ofSeconds(31))).hasMessage("CHECK_DURATION_INVALID");
             settings.replace(settings.status().revision(),true,"fixture","agent",null,Duration.ofHours(1),null);
-            assertThatThrownBy(() -> start(checks)).hasMessage("IDENTITY_RESOLVER_UNAVAILABLE");
+            clock.advance(Duration.ofHours(2));
+            assertThatThrownBy(() -> start(checks)).hasMessage("CREDENTIALS_EXPIRED");
             assertThat(settings.status().activeUse()).isEqualTo("NONE");
         }
     }

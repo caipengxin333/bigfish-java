@@ -60,13 +60,28 @@ class RuntimeCredentialSettingsTest {
         assertThatThrownBy(() -> store.current().requireConnection(clock)).hasMessage("CREDENTIALS_EXPIRED");
         assertThat(store.status().version()).isEqualTo(1);
     }
-    @Test void autoIdentityIsSavedButFailsClosedUntilCollectorEntryIsApproved() {
+    @Test void autoIdentityUsesApprovedCollectorEntryWithoutStartingNetwork() throws Exception {
         var store=empty(); replace(store,null);
         assertThat(store.status().identityMode()).isEqualTo("AUTO");
-        assertThat(store.status().validation()).isEqualTo("IDENTITY_RESOLUTION_REQUIRED");
-        assertThatThrownBy(() -> new SessionCollectors(store,clock).douyin(ignored -> true)).hasMessage("IDENTITY_RESOLVER_UNAVAILABLE");
+        assertThat(store.status().validation()).isEqualTo("LOCAL_VALID");
+        store.current().externalCredentials(clock).validateForResolution(clock.instant());
+        var handle=new SessionCollectors(store,clock).douyin(ignored -> true);
+        assertThat(handle.released().getAsBoolean()).isTrue();
+        assertThat(handle.diagnostics().count(cn.bigfish.collector.CollectorDiagnostics.Counter.HANDSHAKE_ATTEMPT)).isZero();
         assertThatThrownBy(() -> replace(store,"invalid-identity")).hasMessage("CREDENTIALS_INVALID");
         replace(store,"9001"); assertThat(store.status().validation()).isEqualTo("LOCAL_VALID");
+    }
+    @Test void exactMinimumLifetimeUsesOneClockInstantEvenWhenClockAdvancesBetweenReads() {
+        Clock moving=new Clock() {
+            private Instant at=Instant.parse("2026-11-03T00:00:00Z");
+            public ZoneId getZone() { return ZoneOffset.UTC; }
+            public Clock withZone(ZoneId zone) { return this; }
+            public Instant instant() { Instant value=at; at=at.plusMillis(1); return value; }
+        };
+        var store=new DouyinCredentialSettings(key -> null,moving);
+        var value=store.replace(store.status().revision(),true,"fixture","FixtureBrowser/1",null,Duration.ofSeconds(60),null);
+        assertThat(Duration.between(value.updatedAt(),value.localExpiresAt())).isEqualTo(Duration.ofSeconds(60));
+        assertThat(value.validation()).isEqualTo("LOCAL_VALID");
     }
     @Test void leasesFreezeVersionBlockAllWritesAndOldReleaseCannotUnlockNewOwner() {
         var store=empty(); replace(store,"9001"); var first=store.acquire(Use.INTERACTION);

@@ -1,10 +1,10 @@
 # 抖音采集适配器：凭据配置与消息诊断
 
-采集实现与实测更新：2026-11-02；下方官方路线说明沿用此前核查，本次未重新核查平台开放政策。已内置 `NativeDouyinSigner`，由 `SessionCollectors` 显式选择默认 guest 或 external Provider，并接入 `SessionService`。管理页保存数字网页房间号，明确选择 DOUYIN 后在舞台开始互动。默认自动获取游客 Cookie、访客 ID 与内部房间号；external 使用后端环境提供的网页会话。`bootstrap.capabilities.douyinCollector` 和 `providers.douyin.enabled` 表示启动能力已开放，不表示凭据已验证或所有真实接收场景已验收。
+采集实现与实测更新：2026-11-03；下方官方路线说明沿用此前核查，本次未重新核查平台开放政策。已内置 `NativeDouyinSigner`，由 `SessionCollectors` 显式选择默认 guest 或 external Provider，并接入 `SessionService`。管理页保存数字网页房间号，明确选择 DOUYIN 后在舞台开始互动。默认自动获取游客 Cookie、访客 ID 与内部房间号；external 使用页面保存在后端内存或启动环境提供的网页会话。`bootstrap.capabilities.douyinCollector` 和 `providers.douyin.enabled` 表示启动能力已开放，不表示凭据已验证或所有真实接收场景已验收。
 
 **指定房间的独立采集测试已成功接收真实评论。** 第八轮在房间 `440132407257` 的一次 60 秒游客测试收到评论 24、入场 46、点赞 22，MALFORMED 为 0，见 [第八轮记录](../handoffs/phase8-collector-integration.md)。第十轮采集窗口在房间 `53346665360` 的一次 60 秒游客观察中识别 12 条 envelope、2 条评论，`WebcastGiftMessage=0`、`unattributedFailures=0`，资源退出正常，见 [采集交接](../handoffs/collector.md)。这些结果只属于各自观察窗口，不能追溯用户此前“小心心”的丢失原因，也不能推出“游客一定收不到礼物”。**真实礼物、external 登录有效性及真实礼物到舞台的链路仍待验收。** 本轮主集成见 [第十轮记录](../handoffs/phase10-integration.md)。
 
-保存、状态查询与应用启动不连接抖音，只有显式启动 DOUYIN 会话才连接。公开配置字段目前仅接收数字网页号；内部解析器支持规范链接不意味着配置接口接受任意 URL。`runtime.roomId` 为解析后内部号，解析前为空，不可与已保存网页号比较后认定串房。运行中配置变化不切换既有采集房间。
+保存、状态查询与应用启动不连接抖音，只有显式启动 DOUYIN 会话或点击独立连接检查才连接。公开配置字段目前仅接收数字网页号；内部解析器支持规范链接不意味着配置接口接受任意 URL。`runtime.roomId` 为解析后内部号，解析前为空，不可与已保存网页号比较后认定串房。运行中配置变化不切换既有采集房间。
 
 ## 接入方式与适用范围
 
@@ -57,19 +57,31 @@ Cookie 只接受固定平台首页/房间响应中的 `ttwid`，限制值长度�
 
 ## 主会话凭据配置
 
-在 IDEA 的“运行 → 编辑配置 → BigfishApplication → 环境变量”或服务器 Java 进程环境中设置，修改后重启后端。此配置现在同时用于主会话与独立 probe，网页配置页不存储 Cookie，也不会读取 Safari/Chrome 的登录状态。
+推荐在本机管理页“抖音接入身份”操作：
+
+1. 先停止互动，保存数字网页房间号，再选择“使用登录 Cookie”。
+2. Chrome/Safari 登录抖音并打开直播间，开发者工具 → 网络 → 刷新 → Document/文稿请求的请求标头，复制完整 Cookie 值和同一浏览器的 User-Agent。若 Safari 文稿来自 Service Worker、没有 Cookie，查看同域 `/webcast/room/web/enter/` 请求。不要使用响应 Set-Cookie，不上传 HAR 或将真实值发到聊天。
+3. 一次性填写 Cookie、UA 和本机使用期限，保存。默认自动解析 `user_unique_id`；只有明确报 `EXTERNAL_ID_MISSING` 时，从同一会话 `/webcast/im/push/v2/` 查询参数取值补填。页面与手填 ID 冲突会失败，不使用主播 ID、房间号或随机值。
+4. 点击“检查连接（20 秒）”，分别看连接、评论数、礼物数、资源释放结果。检查不进业务队列，不调用 AI/TTS、不发评论或送礼物。没有礼物不等于账号无权限。
+5. 检查退出且资源释放后，去舞台启动互动。收到礼物后继续用 `gift_trace` 核对业务接受、感谢合成和播放，不能把检查的 GIFT 计数当成感谢完成。
+
+页面更新是 Cookie、UA、可选 visitor、截止时间的原子替换；空输入不会清除旧值。只保存在后端进程内存，不写 SQLite、文件、localStorage、普通配置导出或响应；刷新保留、后端重启清空。本机期限为 1 分钟到 7 天，页面提供 30 分钟至 24 小时的选项；它不是平台签发的有效期。主会话和检查在本机期限到达时停止，重连仍使用同一版本快照，不自动续期或回退游客。
+
+配置优先级：本进程页面更新 > 启动环境 > 默认游客。切换游客/明确清除会移除页面 Cookie，并在本进程屏蔽环境旧 Cookie；后端重启后环境值会再次成为默认值。页面显示来源/版本/更新时间/期限，不回显 Cookie、UA 或 visitor。运行、停止未释放及连接检查期间禁止修改；`revision` 冲突返回 409，旧标签页须刷新核对，不能盲重试。
+
+仍可用 IDEA 或进程管理器设置启动默认值，修改环境后需重启。独立 probe 使用自己的进程环境，不读取管理页内存：
 
 | 环境变量 | 内容 |
 | --- | --- |
-| `BIGFISH_DOUYIN_CREDENTIAL_MODE` | 默认 `guest`；显式 `external` 才使用下面四项，值区分大小写 |
-| `BIGFISH_DOUYIN_COOKIE` | 自己有权使用的网页会话 Cookie |
-| `BIGFISH_DOUYIN_USER_AGENT` | 同一网页会话的 User-Agent |
-| `BIGFISH_DOUYIN_USER_UNIQUE_ID` | 同一网页会话对应的数字访客标识；不是主播 ID 或用户抖音号 |
-| `BIGFISH_DOUYIN_CREDENTIALS_EXPIRES_AT` | 本机允许使用到的 ISO-8601 UTC 时间，格式 `YYYY-MM-DDTHH:mm:ssZ`，必须晚于现在 |
+| `BIGFISH_DOUYIN_CREDENTIAL_MODE` | 默认 `guest`；显式 `external` 使用外部网页会话，区分大小写 |
+| `BIGFISH_DOUYIN_COOKIE` | 自己有权使用的完整 Cookie |
+| `BIGFISH_DOUYIN_USER_AGENT` | 同一浏览器会话的 User-Agent |
+| `BIGFISH_DOUYIN_USER_UNIQUE_ID` | 可选，默认自动解析；手填时必须是同一会话数字访客标识 |
+| `BIGFISH_DOUYIN_CREDENTIALS_EXPIRES_AT` | 本机使用截止时间，ISO-8601 UTC，例如格式 `YYYY-MM-DDTHH:mm:ssZ` |
 
-guest 不读取 external 四项；external 缺项、格式错误、过期会明确失败，不回退游客。启动日志 `douyin_connection mode=EXTERNAL validation=LOCAL_VALID platform=UNVERIFIED` 仅代表本地检查通过，不能证明 Cookie 在平台有效。截止时间由用户指定，不是服务端签发的有效期；目前在启动/解析/重连时检查，不会仅因时间到达就中断现有长连接。
+本机 API 为 `/api/v1/douyin/credentials`，契约见 [OpenAPI](../openapi.yaml)。接口检查 loopback RemoteAddr/Host、专用管理头、写入 Origin 与 JSON；拒绝转发来源头与跨站来源。开发期使用 Vite 同源代理，打包后直接同源；本轮不支持远程服务器管理 Cookie。JSON 总上限 32 KiB，Cookie 16 KiB、UA 2 KiB；错误仅返回固定码且 `no-store`。连接检查最多 30 秒、一次采集连接尝试，间隔至少 30 秒，每 5 分钟最多 3 次；取消、超时、过期后须确认资源释放，不能仅凭 UI 离开就宣告停止。
 
-错误配置不阻止应用启动和 MOCK 测试；启动 DOUYIN 时返回 503 与 `DOUYIN_CREDENTIALS_MISSING`、`DOUYIN_CREDENTIALS_INVALID`、`DOUYIN_CREDENTIALS_EXPIRED` 或 `DOUYIN_CREDENTIAL_MODE_INVALID`，运行详情的 collector.lastError 保留相应根因。凭据不写源码、SQLite、日志、前端响应或交接文件；不要将真实值粘贴到聊天中。
+`LOCAL_VALID` 与 `loginFields=PRESENT` 均不证明平台登录有效。guest 不读取外部 Cookie，external 失败不降级。配置错误不阻止应用启动或 MOCK 测试。
 
 ## 礼物没有感谢时如何定位
 
@@ -108,7 +120,7 @@ guest 不读取 external 四项；external 缺项、格式错误、过期会明�
 | `BIGFISH_DOUYIN_SIGNER_REVIEWED` | `receive` 须为 `true`，表示已核对 signer 来源；保留上一轮执行保护 |
 | `BIGFISH_DOUYIN_CREDENTIAL_MODE` | 默认 `guest`；只有显式 `external` 才读取下面四项 |
 
-external 四项与上面的主会话凭据配置相同。不要将真实值写入命令参数、shell 历史或 `runtime/worktree.env`。环境值轮换需重启进程；显式注入的 `CredentialSource` 可逐次提供新值。
+external 参数与上面的启动环境配置相同，visitor 可省略。不要将真实值写入命令参数、shell 历史或 `runtime/worktree.env`。环境值轮换需重启进程；显式注入的 `CredentialSource` 可逐次提供新值。
 
 ## 原生签名来源、实现与在线边界
 
@@ -194,3 +206,9 @@ collector.start(canonicalWebRoomUrl, sessionId, boundedEngineIngress);
 本轮本地验证包含：仅输入房间号 → 实际 Java HTTP 获取合成首页 Cookie 和房间页面（2 次请求）→ 自动访客字段 → 原生签名 → 实际 JDK 回环 WebSocket → gzip/Protobuf → 本地事件接收器。产生 1 条 COMMENT、3 条 GIFT（增量 1/2/1）、1 条 ENTRANCE、1 条 FOLLOW；重复终包不重发，异常包后继续收取，ACK/心跳正常，关播 ENDED 后释放。此测试通过包内 seam 把传输目标替换为本机回环，不是抖音服务器对签名的验证，不能充当真实接收记录。
 
 自动游客初始化代码为独立 Java 实现，参考已有 MIT 来源中公开的 `ttwid`/`user_unique_id` 协议字段事实；没有复制旧 AI-Vtuber 的 AGPL Python/JS 代码、固定访客值、历史 URL 模板或协议脚本。原生 signer 与 MIT 版权说明保持原样，无新增依赖或后台进程。主会话已通过 SessionCollectors 接入工厂，ENDED/FAILED 会关闭处理链，旧资源未退出时返回 COLLECTOR_STOPPING；真实服务验收仍独立于能力标志。
+
+## 最新真实接收证据（2026-11-03）
+
+采集窗口在用户授权的 Safari Cookie 会话执行一次 60 秒 receive：`WebcastGiftMessage=65`、解析成功 65、连击重复 11、归一化/派发 GIFT 54、COMMENT 55、LIKE 19；ACK 163、MALFORMED 0，停止后资源归零。完整脱敏交接见 [collector.md](../handoffs/collector.md)。
+
+该结果证明指定 external 会话可收到礼物并派发到独立 sink；未记录礼物名称，不能认定全部为粉丝团灯牌，也未验证主会话业务接纳和感谢语音。与先前游客观测不是同时受控对照，不能推出“游客一定收不到礼物”。

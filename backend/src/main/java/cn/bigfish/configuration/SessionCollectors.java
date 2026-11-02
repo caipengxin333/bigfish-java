@@ -4,7 +4,6 @@ import cn.bigfish.collector.*;
 import cn.bigfish.contract.CollectorPort;
 import java.io.ByteArrayInputStream;
 import java.time.Clock;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -63,16 +62,7 @@ public class SessionCollectors {
         var provider = snapshot.mode()==DouyinCredentialSettings.Mode.GUEST ? guestProvider(signer)
             : externalProvider(() -> snapshot.externalCredentials(clock),signer);
         log.info("douyin_connection_selected mode={} source={} version={} validation={} platform=UNVERIFIED",snapshot.mode(),snapshot.source(),snapshot.version(),snapshot.validation(clock));
-        DouyinConnectionProvider selected=provider;
-        if(boundedCheck) selected=new DouyinConnectionProvider() {
-            private final AtomicBoolean attempted=new AtomicBoolean();
-            public DouyinConnection resolve(String room) throws Exception { return resolve(room,null); }
-            public DouyinConnection resolve(String room,String expectedRoom) throws Exception {
-                if(!attempted.compareAndSet(false,true)) throw new DouyinFailure(DouyinFailure.Code.ATTEMPT_LIMIT);
-                return provider.resolve(room,expectedRoom);
-            }
-        };
-        var collector = new DouyinCollector(selected);
+        var collector = new DouyinCollector(provider,boundedCheck);
         return new Handle(collector,collector.diagnostics(),() -> collector.resources().released()
             && provider.inFlightRequests()==0 && provider.signingWorkers()==0);
     }

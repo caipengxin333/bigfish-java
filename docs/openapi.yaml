@@ -3,7 +3,7 @@
   "info": {
     "title": "BigFish Integrated API",
     "version": "1.0.0",
-    "description": "配置、显式 MOCK/DOUYIN 主会话、DeepSeek/阿里云 NLS、Token 状态、有限运行诊断及播放接口；抖音启动能力已开放，真实接收仍待验收。"
+    "description": "配置、主会话、DeepSeek/阿里云 NLS、诊断和播放；抖音本机内存身份配置及有界接收检查。真实评论/礼物已在指定 external 独立采集验证，主会话到感谢播放仍需验收。"
   },
   "servers": [
     {
@@ -428,6 +428,1286 @@
                 "schema": {
                   "$ref": "#/components/schemas/RuntimeDiagnosticsView"
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/douyin/credentials": {
+      "get": {
+        "operationId": "getDouyinCredentialStatus",
+        "parameters": [
+          {
+            "name": "X-BigFish-Local-Management",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          }
+        ],
+        "description": "仅本机同源管理；凭据仅进程内存，运行时配置优先环境配置。修改需 revision CAS 且无活跃租约；游客/清除不在本进程回退环境 Cookie。启动检查仅采集，不经过 AI/TTS。状态字段只给脱敏元数据。",
+        "responses": {
+          "200": {
+            "description": "成功；检查启动为异步结果，不表示登录或收到礼物",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinCredentialStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "固定输入错误码，不回显输入",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "本机/同源/请求头校验拒绝",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "版本冲突或互动/检查仍在使用凭据",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "JSON 请求超过 32768 字节",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "检查间隔30秒且每5分钟最多3次",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "凭据不可用或检查无法创建",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/douyin/credentials/mode": {
+      "put": {
+        "operationId": "setDouyinGuest",
+        "parameters": [
+          {
+            "name": "X-BigFish-Local-Management",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "浏览器自动提供，必须精确匹配请求 Host 的 scheme/host/port；仅 localhost/127.0.0.1/::1，拒绝 Forwarded/X-Forwarded-*。"
+          }
+        ],
+        "description": "仅本机同源管理；凭据仅进程内存，运行时配置优先环境配置。修改需 revision CAS 且无活跃租约；游客/清除不在本进程回退环境 Cookie。启动检查仅采集，不经过 AI/TTS。状态字段只给脱敏元数据。",
+        "responses": {
+          "200": {
+            "description": "成功；检查启动为异步结果，不表示登录或收到礼物",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinCredentialStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "固定输入错误码，不回显输入",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "本机/同源/请求头校验拒绝",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "版本冲突或互动/检查仍在使用凭据",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "JSON 请求超过 32768 字节",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "检查间隔30秒且每5分钟最多3次",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "凭据不可用或检查无法创建",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DouyinSetGuest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/douyin/credentials/cookie": {
+      "put": {
+        "operationId": "replaceDouyinCookie",
+        "parameters": [
+          {
+            "name": "X-BigFish-Local-Management",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "浏览器自动提供，必须精确匹配请求 Host 的 scheme/host/port；仅 localhost/127.0.0.1/::1，拒绝 Forwarded/X-Forwarded-*。"
+          }
+        ],
+        "description": "仅本机同源管理；凭据仅进程内存，运行时配置优先环境配置。修改需 revision CAS 且无活跃租约；游客/清除不在本进程回退环境 Cookie。启动检查仅采集，不经过 AI/TTS。状态字段只给脱敏元数据。",
+        "responses": {
+          "200": {
+            "description": "成功；检查启动为异步结果，不表示登录或收到礼物",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinCredentialStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "固定输入错误码，不回显输入",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "本机/同源/请求头校验拒绝",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "版本冲突或互动/检查仍在使用凭据",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "JSON 请求超过 32768 字节",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "检查间隔30秒且每5分钟最多3次",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "凭据不可用或检查无法创建",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DouyinReplaceCookie"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/douyin/credentials/clear": {
+      "post": {
+        "operationId": "clearDouyinCookie",
+        "parameters": [
+          {
+            "name": "X-BigFish-Local-Management",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "浏览器自动提供，必须精确匹配请求 Host 的 scheme/host/port；仅 localhost/127.0.0.1/::1，拒绝 Forwarded/X-Forwarded-*。"
+          }
+        ],
+        "description": "仅本机同源管理；凭据仅进程内存，运行时配置优先环境配置。修改需 revision CAS 且无活跃租约；游客/清除不在本进程回退环境 Cookie。启动检查仅采集，不经过 AI/TTS。状态字段只给脱敏元数据。",
+        "responses": {
+          "200": {
+            "description": "成功；检查启动为异步结果，不表示登录或收到礼物",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinCredentialStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "固定输入错误码，不回显输入",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "本机/同源/请求头校验拒绝",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "版本冲突或互动/检查仍在使用凭据",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "JSON 请求超过 32768 字节",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "检查间隔30秒且每5分钟最多3次",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "凭据不可用或检查无法创建",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DouyinClearCookie"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/douyin/credentials/checks": {
+      "post": {
+        "operationId": "startDouyinCheck",
+        "parameters": [
+          {
+            "name": "X-BigFish-Local-Management",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "浏览器自动提供，必须精确匹配请求 Host 的 scheme/host/port；仅 localhost/127.0.0.1/::1，拒绝 Forwarded/X-Forwarded-*。"
+          }
+        ],
+        "description": "仅本机同源管理；凭据仅进程内存，运行时配置优先环境配置。修改需 revision CAS 且无活跃租约；游客/清除不在本进程回退环境 Cookie。启动检查仅采集，不经过 AI/TTS。状态字段只给脱敏元数据。",
+        "responses": {
+          "202": {
+            "description": "成功；检查启动为异步结果，不表示登录或收到礼物",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinConnectionCheck"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "固定输入错误码，不回显输入",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "本机/同源/请求头校验拒绝",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "版本冲突或互动/检查仍在使用凭据",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "JSON 请求超过 32768 字节",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "检查间隔30秒且每5分钟最多3次",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "凭据不可用或检查无法创建",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DouyinStartCheck"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/douyin/credentials/checks/{id}": {
+      "get": {
+        "operationId": "getDouyinCheck",
+        "parameters": [
+          {
+            "name": "X-BigFish-Local-Management",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "description": "仅本机同源管理；凭据仅进程内存，运行时配置优先环境配置。修改需 revision CAS 且无活跃租约；游客/清除不在本进程回退环境 Cookie。启动检查仅采集，不经过 AI/TTS。状态字段只给脱敏元数据。",
+        "responses": {
+          "200": {
+            "description": "成功；检查启动为异步结果，不表示登录或收到礼物",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinConnectionCheck"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "固定输入错误码，不回显输入",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "本机/同源/请求头校验拒绝",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "版本冲突或互动/检查仍在使用凭据",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "JSON 请求超过 32768 字节",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "检查间隔30秒且每5分钟最多3次",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "凭据不可用或检查无法创建",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "检查不存在",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/douyin/credentials/checks/{id}/cancel": {
+      "post": {
+        "operationId": "cancelDouyinCheck",
+        "parameters": [
+          {
+            "name": "X-BigFish-Local-Management",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "浏览器自动提供，必须精确匹配请求 Host 的 scheme/host/port；仅 localhost/127.0.0.1/::1，拒绝 Forwarded/X-Forwarded-*。"
+          }
+        ],
+        "description": "仅本机同源管理；凭据仅进程内存，运行时配置优先环境配置。修改需 revision CAS 且无活跃租约；游客/清除不在本进程回退环境 Cookie。启动检查仅采集，不经过 AI/TTS。状态字段只给脱敏元数据。",
+        "responses": {
+          "200": {
+            "description": "成功；检查启动为异步结果，不表示登录或收到礼物",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinConnectionCheck"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "固定输入错误码，不回显输入",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "本机/同源/请求头校验拒绝",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "版本冲突或互动/检查仍在使用凭据",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "JSON 请求超过 32768 字节",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "检查间隔30秒且每5分钟最多3次",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "凭据不可用或检查无法创建",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "检查不存在",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "no-store"
+                  ]
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DouyinAccessError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DouyinCancelCheck"
               }
             }
           }
@@ -1327,6 +2607,336 @@
           }
         },
         "description": "当前会话内存诊断，固定返回最近最多 20 条阶段记录（时间正序），保留 5 分钟；新会话重置。历史失败不代表当前仍失败。与 runtime 分别读取时应按 sessionId/state 校验，不能混用旧会话结果。"
+      },
+      "DouyinCredentialStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "GUEST",
+              "EXTERNAL",
+              "INVALID"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "DEFAULT",
+              "ENVIRONMENT",
+              "RUNTIME"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "revision": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cookieConfigured": {
+            "type": "boolean"
+          },
+          "localExpiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "validation": {
+            "type": "string"
+          },
+          "identityMode": {
+            "type": "string",
+            "enum": [
+              "AUTO",
+              "MANUAL"
+            ]
+          },
+          "activeUse": {
+            "type": "string",
+            "enum": [
+              "NONE",
+              "INTERACTION",
+              "INTERACTION_STOPPING",
+              "CHECK",
+              "CHECK_STOPPING"
+            ]
+          },
+          "activeVersion": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          }
+        },
+        "required": [
+          "mode",
+          "source",
+          "version",
+          "revision",
+          "updatedAt",
+          "cookieConfigured",
+          "localExpiresAt",
+          "validation",
+          "identityMode",
+          "activeUse",
+          "activeVersion"
+        ]
+      },
+      "DouyinSetGuest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expectedRevision": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "GUEST"
+            ]
+          }
+        },
+        "required": [
+          "expectedRevision",
+          "mode"
+        ]
+      },
+      "DouyinReplaceCookie": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expectedRevision": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "replace": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "cookie": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16384,
+            "writeOnly": true
+          },
+          "userAgent": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "writeOnly": true
+          },
+          "userUniqueIdOverride": {
+            "type": "string",
+            "pattern": "^(?:[1-9][0-9]{0,29})?$",
+            "writeOnly": true
+          },
+          "localLifetimeSeconds": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 604800
+          },
+          "localExpiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "expectedRevision",
+          "replace",
+          "cookie",
+          "userAgent"
+        ],
+        "oneOf": [
+          {
+            "required": [
+              "localLifetimeSeconds"
+            ],
+            "not": {
+              "required": [
+                "localExpiresAt"
+              ]
+            }
+          },
+          {
+            "required": [
+              "localExpiresAt"
+            ],
+            "not": {
+              "required": [
+                "localLifetimeSeconds"
+              ]
+            }
+          }
+        ],
+        "description": "完整 Cookie 和同一来源的 UA 原子替换；可选手工 visitor，默认自动。两个期限字段必须且只能提供一个。截止时间是本机使用期限，不证明平台有效。"
+      },
+      "DouyinClearCookie": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expectedRevision": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "confirm": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "required": [
+          "expectedRevision",
+          "confirm"
+        ]
+      },
+      "DouyinStartCheck": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expectedRevision": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "roomId": {
+            "type": "string",
+            "pattern": "^[0-9]{1,30}$"
+          },
+          "durationSeconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          }
+        },
+        "required": [
+          "expectedRevision",
+          "roomId",
+          "durationSeconds"
+        ]
+      },
+      "DouyinCancelCheck": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {},
+        "required": []
+      },
+      "DouyinAccessError": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ]
+      },
+      "DouyinConnectionCheck": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "checkId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "configVersion": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "configRevision": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "DEFAULT",
+              "ENVIRONMENT",
+              "RUNTIME"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "GUEST",
+              "EXTERNAL",
+              "INVALID"
+            ]
+          },
+          "localValidation": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "CONNECTING",
+              "OBSERVING",
+              "STOPPING",
+              "COMPLETED",
+              "FAILED",
+              "CANCELLED",
+              "TIMED_OUT"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "cleanupError": {
+            "type": "string"
+          },
+          "connected": {
+            "type": "boolean"
+          },
+          "comments": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "gifts": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deadline": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "resourcesReleased": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "checkId",
+          "configVersion",
+          "configRevision",
+          "source",
+          "mode",
+          "localValidation",
+          "state",
+          "reason",
+          "cleanupError",
+          "connected",
+          "comments",
+          "gifts",
+          "startedAt",
+          "deadline",
+          "resourcesReleased"
+        ]
       }
     }
   }

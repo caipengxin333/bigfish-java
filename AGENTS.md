@@ -7,7 +7,7 @@
 
 ## 工作边界
 
-当前职责以用户第十轮任务及 docs/task-boundaries.md 为准：后端窗口负责显式 guest/external 凭据接线与礼物业务轨迹，采集窗口负责过滤前 method 统计及解析、归一化、去重、派发诊断。前端及 Java 语音适配本轮没有新任务。公共契约、文档和最终联调由主集成窗口负责，结果见 docs/handoffs/phase10-integration.md。独立 GitHub 上传按 docs/prompts/github-publish.md 执行；实现窗口仍不推送。
+当前第十一轮已合并：后端负责内存凭据生命周期/检查服务，采集负责同 Cookie/UA 的自动 visitor 解析和真实接收诊断，前端负责身份配置页面。主集成完成公共接口与 REAL 接线，见 docs/handoffs/phase11-integration.md。下一轮各窗口先合入最新 main；保留原子替换、同源管理保护、CAS/租约、过期停止、有界检查及所有回归。独立 GitHub 上传按 docs/prompts/github-publish.md 执行；实现窗口不推送。
 1. 当前项目是独立的新实现，不是 Luna 的原地重写。首先阅读 README.md、docs/architecture.md、docs/task-boundaries.md、自己任务对应的 docs/prompts 文件。
 2. 只在指定 worktree 和分支工作；每次开工检查 `pwd`、`git branch --show-current`、`git status --short`。
    - 每轮继续开发也要同步基线，不只首次开工。功能分支先执行 `git merge-base --is-ancestor main HEAD`；非 0 表示尚未包含当前 main。保留并核对本工作树已有改动，干净后执行 `git merge --no-edit main`，再阅读最新对应 handoff。不得用复制目录、reset 或整文件选一方替代合并。
@@ -32,3 +32,5 @@
 - 第六轮已整合后端故障一致性及前端恢复提示，最新验收见 docs/handoffs/phase6-integration.md。后续同步 main 后须保留终止根因优先、主动取消不计失败、同环节恢复证据，以及停止超时后新 STOPPED 快照解除旧提示的回归；公共 phase/recoveredAt 字段仍仅是提案。
 - 第九轮固定 BigFish Live2D 已接入；模型/Core 放独立外部目录，与 BIGFISH_DATA_DIR 分离，不进 Git、dist 或 JAR。前端资源代理与业务代理统一，默认 18080；工作树使用 BIGFISH_API_TARGET。原始 Framework/Core 声明不适用项目 Apache-2.0；保留来源和产物声明。SDK/模型当前固定，自动扫描/上传尚未实现。
 - 第十轮增加 guest/external 显式选择和两层礼物日志；默认仍 guest，external 的 LOCAL_VALID 仅说明本地格式/截止时间通过，不证明平台登录有效或礼物完整。保留有界计数、脱敏限频、ACK/坏包隔离及业务终态保护；LIKE_NO_SPEECH 不变。collector_inbound 的 SINK_RETURNED 不是业务 ACCEPTED；gift_trace 文件只覆盖业务阶段。真实礼物漏收根因仍待新日志定位，不能写成已修复。下一轮先同步 main，保留凭据工厂只允许 credentialMode 元数据读取的集成回归。
+
+- 第十一轮指定 external 独立采集已收到 65 条礼物，去重后派发 54 条；旧段落“真实礼物未验证”是历史状态。主会话至感谢播放仍待验收，不把采集成功等同业务接受。页面内存配置与启动环境是不同来源；重启会恢复环境默认。

@@ -12,7 +12,8 @@ export default defineConfig({
     port: Number(process.env.BIGFISH_UI_PORT || 15173), strictPort: true,
     proxy: {
       '/avatar-assets': process.env.BIGFISH_API_TARGET || 'http://127.0.0.1:18080',
-      '/api': process.env.BIGFISH_API_TARGET || 'http://127.0.0.1:18080',
+      // Keep the browser Host paired with Origin for local-only credential writes.
+      '/api': { target: process.env.BIGFISH_API_TARGET || 'http://127.0.0.1:18080', changeOrigin: false },
       '/actuator': process.env.BIGFISH_API_TARGET || 'http://127.0.0.1:18080',
       '/ws': { target: process.env.BIGFISH_API_TARGET || 'http://127.0.0.1:18080', ws: true, changeOrigin: false },
     },

@@ -5,7 +5,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import java.util.*;
 
-/** Internal policy for the proposed sensitive routes. Not registered against existing APIs. */
+/** Policy for local-only sensitive routes, separate from ordinary management APIs. */
 public final class LocalManagementAccess {
     public void require(HttpServletRequest request,boolean writing) {
         if(!loopback(request.getRemoteAddr())) deny("LOCAL_ACCESS_REQUIRED");

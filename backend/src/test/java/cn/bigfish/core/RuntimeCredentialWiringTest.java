@@ -34,7 +34,7 @@ class RuntimeCredentialWiringTest {
     @Autowired ObjectMapper mapper;
     @Autowired MockMvc mvc;
     @Autowired JdbcTemplate jdbc;
-    @Test void liveBeanUpdatesSurviveRefreshWithoutEnteringOrdinaryApisOrSqliteAndNoEndpointIsPublished() throws Exception {
+    @Test void liveBeanUpdatesSurviveRefreshWithoutEnteringOrdinaryApisOrSqliteAndSensitiveEndpointIsGuarded() throws Exception {
         assertThat(collectors.settings()).isSameAs(settings);
         settings.replace(settings.status().revision(),true,"private-cookie-fixture","private-agent-fixture","987654321",Duration.ofHours(1),null);
         var selected=settings.status();
@@ -45,7 +45,11 @@ class RuntimeCredentialWiringTest {
         }
         assertThat(jdbc.queryForObject("SELECT content_json FROM app_config WHERE id=1",String.class))
             .doesNotContain("private-cookie","private-agent","987654321","cookieConfigured");
-        mvc.perform(get("/api/v1/douyin/credentials")).andExpect(status().isNotFound());
+        mvc.perform(get("/api/v1/douyin/credentials")).andExpect(status().isForbidden());
+        String safe=mvc.perform(get("/api/v1/douyin/credentials").header("Host","localhost")
+            .header("X-BigFish-Local-Management","1")).andExpect(status().isOk())
+            .andExpect(header().string("Cache-Control","no-store")).andReturn().getResponse().getContentAsString();
+        assertThat(safe).contains("cookieConfigured").doesNotContain("private-cookie","private-agent","987654321");
         var running=sessions.start(new StartSessionRequest(StartSessionRequest.Mode.MOCK,StartSessionRequest.ConversationMode.MOCK));
         assertThatThrownBy(() -> settings.clear(selected.revision(),true)).hasMessage("SESSION_ACTIVE");
         sessions.stop(running.sessionId()); settings.clear(selected.revision(),true);

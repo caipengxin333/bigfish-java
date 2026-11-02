@@ -54,3 +54,21 @@ export interface RuntimeView {
   dropped: number; failures: number; lastError: string; lastErrorAt: string;
 }
 export type EventResult = 'ACCEPTED' | 'DUPLICATE' | 'REJECTED_FULL' | 'REJECTED_SESSION' | 'INVALID'
+// Local-only, memory-backed Douyin identity management. Secrets are write-only.
+export interface DouyinCredentialStatus {
+  mode: 'GUEST' | 'EXTERNAL' | 'INVALID'; source: 'DEFAULT' | 'ENVIRONMENT' | 'RUNTIME'
+  version: number; revision: string; updatedAt: string; cookieConfigured: boolean
+  localExpiresAt: string | null; validation: string; identityMode: 'AUTO' | 'MANUAL'
+  activeUse: 'NONE' | 'INTERACTION' | 'INTERACTION_STOPPING' | 'CHECK' | 'CHECK_STOPPING'; activeVersion: number | null
+}
+export interface DouyinCredentialReplacement {
+  expectedRevision: string; replace: true; cookie: string; userAgent: string
+  userUniqueIdOverride?: string; localLifetimeSeconds?: number; localExpiresAt?: string
+}
+export interface DouyinConnectionCheck {
+  checkId: string; configVersion: number; configRevision: string
+  source: DouyinCredentialStatus['source']; mode: DouyinCredentialStatus['mode']; localValidation: string
+  state: 'CONNECTING' | 'OBSERVING' | 'STOPPING' | 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'TIMED_OUT'
+  reason: string; cleanupError: string; connected: boolean; comments: number; gifts: number
+  startedAt: string; deadline: string; resourcesReleased: boolean
+}

@@ -12,12 +12,21 @@ import static cn.bigfish.collector.CollectorDiagnostics.Counter.*;
 public final class DouyinCollector extends AbstractCollector {
     private final DouyinConnectionProvider provider;
     private final Supplier<CollectorSocket> sockets;
+    private final boolean singleAttempt;
 
     public DouyinCollector(DouyinConnectionProvider provider) {
         this(provider, CollectorOptions.defaults(), Clock.systemUTC(), null);
     }
+    /** Bounded read-only checks retain the original provider's safe identity diagnostics. */
+    public DouyinCollector(DouyinConnectionProvider provider, boolean singleAttempt) {
+        this(provider, CollectorOptions.defaults(), Clock.systemUTC(), null, singleAttempt);
+    }
     DouyinCollector(DouyinConnectionProvider provider, CollectorOptions options, Clock clock, Supplier<CollectorSocket> sockets) {
+        this(provider, options, clock, sockets, false);
+    }
+    private DouyinCollector(DouyinConnectionProvider provider, CollectorOptions options, Clock clock, Supplier<CollectorSocket> sockets, boolean singleAttempt) {
         super(options, clock); this.provider = Objects.requireNonNull(provider);
+        this.singleAttempt = singleAttempt;
         if (provider instanceof WebDouyinConnectionProvider web) diagnostics().inbound().credentials(web.credentialMode());
         this.sockets = sockets == null ? () -> new JdkCollectorSocket(options, diagnostics(), clock) : sockets;
     }
@@ -26,9 +35,10 @@ public final class DouyinCollector extends AbstractCollector {
     @Override protected void collect(Run context) throws Exception {
         String webRoom = DouyinRoomInput.parse(context.requestedRoom).webRoomId();
         var protocol = new DouyinProtocol(options.maxFrameBytes(), diagnostics());
-        int failures = 0;
+        int failures = 0, attempts = 0;
         String resolvedRoom = null;
         while (context.active.get()) {
+            if (singleAttempt && attempts++ > 0) throw new DouyinFailure(DouyinFailure.Code.ATTEMPT_LIMIT);
             long started = System.nanoTime();
             diagnostics().inbound().nextConnection();
             try {

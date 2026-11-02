@@ -40,11 +40,10 @@ public final class DouyinCredentialSettings {
             if(invalid!=null) return invalid;
             if(mode==Mode.GUEST) return "GUEST_AUTO";
             if(!expires.isAfter(clock.instant())) return "CREDENTIALS_EXPIRED";
-            return blank(visitor) ? "IDENTITY_RESOLUTION_REQUIRED" : "LOCAL_VALID";
+            return "LOCAL_VALID"; // Visitor discovery is now supported by the external provider.
         }
         public void requireConnection(Clock clock) {
             String result=validation(clock);
-            if(result.equals("IDENTITY_RESOLUTION_REQUIRED")) throw new Failure("IDENTITY_RESOLVER_UNAVAILABLE",503);
             if(!result.equals("GUEST_AUTO") && !result.equals("LOCAL_VALID")) throw new Failure(result,503);
         }
         public DouyinCredentials externalCredentials(Clock clock) throws DouyinFailure {
@@ -102,15 +101,15 @@ public final class DouyinCredentialSettings {
         writable(expectedRevision);
         if(!replace) throw new Failure("REPLACEMENT_REQUIRED",400);
         if((lifetime==null)==(expiresAt==null)) throw new Failure("LOCAL_DEADLINE_INVALID",400);
-        Instant expires;
-        try { expires=lifetime==null ? expiresAt : clock.instant().plus(lifetime); }
+        Instant at=clock.instant(),expires;
+        try { expires=lifetime==null ? expiresAt : at.plus(lifetime); }
         catch(DateTimeException | ArithmeticException invalid) { throw new Failure("LOCAL_DEADLINE_INVALID",400); }
-        Duration remaining=Duration.between(clock.instant(),expires);
+        Duration remaining=Duration.between(at,expires);
         if(remaining.compareTo(Duration.ofMinutes(1))<0 || remaining.compareTo(Duration.ofDays(7))>0)
             throw new Failure("LOCAL_DEADLINE_INVALID",400);
-        String invalid=validate(cookie,agent,manualVisitor,expires,true);
+        String invalid=validate(cookie,agent,manualVisitor,expires);
         if(invalid!=null) throw new Failure(invalid,400);
-        selected=new Snapshot(Mode.EXTERNAL,Source.RUNTIME,selected.version+1,clock.instant(),cookie,agent,manualVisitor,expires,null);
+        selected=new Snapshot(Mode.EXTERNAL,Source.RUNTIME,selected.version+1,at,cookie,agent,manualVisitor,expires,null);
         return status();
     }
     private void writable(String expected) { idle(); revision(expected); }
@@ -132,17 +131,18 @@ public final class DouyinCredentialSettings {
             String expiry=env.apply("BIGFISH_DOUYIN_CREDENTIALS_EXPIRES_AT");
             Instant expires=expiry==null ? null : Instant.parse(expiry);
             String cookie=env.apply("BIGFISH_DOUYIN_COOKIE"),agent=env.apply("BIGFISH_DOUYIN_USER_AGENT"),visitor=env.apply("BIGFISH_DOUYIN_USER_UNIQUE_ID");
-            return new Snapshot(mode,Source.ENVIRONMENT,0,clock.instant(),cookie,agent,visitor,expires,validate(cookie,agent,visitor,expires,false));
+            return new Snapshot(mode,Source.ENVIRONMENT,0,clock.instant(),cookie,agent,visitor,expires,validate(cookie,agent,visitor,expires));
         } catch(RuntimeException invalid) { return new Snapshot(mode,Source.ENVIRONMENT,0,clock.instant(),null,null,null,null,"CREDENTIALS_INVALID"); }
     }
     private Snapshot invalidEnvironment(String code) { return new Snapshot(Mode.INVALID,Source.ENVIRONMENT,0,clock.instant(),null,null,null,null,code); }
     private static boolean blank(String value) { return value==null || value.isBlank(); }
-    private static String validate(String cookie,String agent,String visitor,Instant expires,boolean allowAutoIdentity) {
-        if(blank(cookie) || blank(agent) || !allowAutoIdentity && blank(visitor)) return "CREDENTIALS_MISSING";
-        if(cookie.length()>16384 || agent.length()>2048 || cookie.contains("\r") || cookie.contains("\n")
-            || agent.contains("\r") || agent.contains("\n") || expires==null
-            || !blank(visitor) && !visitor.matches("[0-9]{1,30}")) return "CREDENTIALS_INVALID";
-        return null;
+    private static String validate(String cookie,String agent,String visitor,Instant expires) {
+        try {
+            // Collector owns the canonical header and optional identity validation.
+            // Expiry is checked against the service clock by Snapshot.validation.
+            new DouyinCredentials(cookie,agent,visitor,expires).validateForResolution(Instant.MIN);
+            return null;
+        } catch(DouyinFailure invalid) { return invalid.code().name(); }
     }
     @JsonValue @Override public String toString() { return "DouyinCredentialSettings[redacted]"; }
 }

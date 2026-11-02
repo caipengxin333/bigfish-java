@@ -9,14 +9,22 @@ import { renderToString } from 'vue/server-renderer'
 import { createIdentityEditor } from '../src/identity/editor.ts'
 import { createIdentityDemo } from '../src/mock/identity.ts'
 const componentUrl = new URL('../src/components/DouyinIdentityPanel.vue', import.meta.url)
-const { descriptor } = parse(await readFile(componentUrl, 'utf8'), { filename: fileURLToPath(componentUrl) })
-const script = compileScript(descriptor, { id: 'identity-panel-test', inlineTemplate: true, templateOptions: { ssr: true } })
 const urlFor = (value: string) => `data:text/javascript;base64,${Buffer.from(value).toString('base64')}`
-const compiled = ts.transpileModule(script.content, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText
-  .replace(/from ["']([^"']+)["']/g, (_match, specifier) => `from ${JSON.stringify(specifier === '../identity/editor.ts'
-    ? urlFor('export const createIdentityEditor = () => globalThis.__identityTestEditor;')
-    : specifier.startsWith('.') ? new URL(specifier, componentUrl).href : import.meta.resolve(specifier))}`)
-const Panel = (await import(urlFor(compiled))).default
+async function compileComponent(url: URL): Promise<string> {
+  const { descriptor } = parse(await readFile(url, 'utf8'), { filename: fileURLToPath(url) })
+  const script = compileScript(descriptor, { id: 'identity-panel-test', inlineTemplate: true, templateOptions: { ssr: true } })
+  let compiled = ts.transpileModule(script.content, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText
+  for (const match of [...compiled.matchAll(/from ["']([^"']+)["']/g)]) {
+    const specifier = match[1]!
+    const target = specifier === '../identity/editor.ts'
+      ? urlFor('export const createIdentityEditor = () => globalThis.__identityTestEditor;')
+      : specifier.endsWith('.vue') ? await compileComponent(new URL(specifier, url))
+      : specifier.startsWith('.') ? new URL(specifier, url).href : import.meta.resolve(specifier)
+    compiled = compiled.replace(match[0], `from ${JSON.stringify(target)}`)
+  }
+  return urlFor(compiled)
+}
+const Panel = (await import(await compileComponent(componentUrl))).default
 async function withEditor(run: (editor: ReturnType<typeof createIdentityEditor>, demo: ReturnType<typeof createIdentityDemo>, render: (locked?: boolean, real?: boolean) => Promise<string>) => Promise<void>) {
   let raw: string | null = null
   const demo = createIdentityDemo(() => ({ getItem: () => raw, setItem: (_key, value) => { raw = value } }), Date.now, 0)
@@ -29,11 +37,13 @@ async function withEditor(run: (editor: ReturnType<typeof createIdentityEditor>,
   }
   try { await run(editor, demo, render) } finally { editor.dispose(); delete (globalThis as any).__identityTestEditor }
 }
-test('real panel visibly unavailable; disabled forms cannot silently fall back to mock', async () => {
+test('real panel waits for confirmed backend state and never falls back to mock', async () => {
   await withEditor(async (_editor, _demo, render) => {
     const html = await render(false, true)
-    assert.match(html, /真实接口 · 待接入/); assert.match(html, /无法确认后端凭据状态/)
+    assert.match(html, /REAL · 后端内存配置/); assert.match(html, /后端身份状态尚未确认/)
     assert.match(html, /<fieldset disabled/); assert.doesNotMatch(html, /type="password"|后端已保存|已登录成功/)
+    assert.match(html, /检查连接（20 秒）/); assert.match(html, /webcast\/room\/web\/enter/)
+    assert.doesNotMatch(html, /检查连接（MOCK）|真实接口 · 待接入/)
   })
 })
 test('actual Cookie panel uses password input, separate forms and clear confirmation, without login claims', async () => {

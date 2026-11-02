@@ -11,7 +11,7 @@ import java.util.concurrent.*;
 import java.util.function.Function;
 import org.springframework.scheduling.annotation.Scheduled;
 
-/** Internal bounded receive check. No engine, model or speech dependency; no public routes. */
+/** Internal bounded receive check. No engine, model or speech dependency; exposed only by the local-only controller. */
 public final class DouyinConnectionChecks implements AutoCloseable {
     public enum State { CONNECTING, OBSERVING, STOPPING, COMPLETED, FAILED, CANCELLED, TIMED_OUT }
     public record View(String checkId,long configVersion,String configRevision,Source source,Mode mode,

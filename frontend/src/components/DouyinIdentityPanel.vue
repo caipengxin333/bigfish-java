@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { createIdentityEditor } from '../identity/editor.ts'
 import { createIdentityDemo, identityDemoKey } from '../mock/identity.ts'
+import ManagedDouyinIdentityPanel from './ManagedDouyinIdentityPanel.vue'
 import type { CheckScenario } from '../identity/editor.ts'
 const props = defineProps<{ demo: boolean; locked: boolean; roomId?: string; roomPending: boolean }>()
 const simulatedRunning = ref(false), writeFailure = ref(false), readFailure = ref(false), scenario = ref<CheckScenario>('connected')
@@ -29,7 +30,8 @@ onMounted(() => { refresh(); timer = setInterval(() => { clock.value = Date.now(
 onBeforeUnmount(() => { clearInterval(timer); editor.dispose(); window.removeEventListener('focus', refresh); window.removeEventListener('pageshow', refresh); window.removeEventListener('pagehide', leave); window.removeEventListener('storage', storage) })
 </script>
 <template>
-  <section class="panel identity-panel" aria-labelledby="identity-title">
+  <ManagedDouyinIdentityPanel v-if="!demo" :locked="props.locked" :room-id="roomId" :room-pending="roomPending" />
+  <section v-else class="panel identity-panel" aria-labelledby="identity-title">
     <div class="form-title"><div><p class="eyebrow">DOUYIN ACCESS</p><h2 id="identity-title">抖音接入身份</h2></div><span class="identity-badge">{{ demo ? 'MOCK · 本地界面演练' : '真实接口 · 待接入' }}</span></div>
     <p class="muted">已保存房间：{{ roomId || '未填写' }}。<a href="#configuration">修改并保存房间配置 ↓</a>{{ roomPending ? '房间存在未保存或待核对的变更，不能检查连接。' : '' }}</p>
     <p v-if="!demo" class="message warning" role="status">身份管理公共契约尚未接入，无法确认后端凭据状态。真实保存、清除和检查暂不可用；不会悄悄改用 mock。<a href="/admin?transport=mock#douyin-identity">打开明确的本地演练</a>。</p>
