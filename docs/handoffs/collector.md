@@ -1,4 +1,38 @@
-# 小心心未进入感谢流程：礼物阶段诊断交接（2026-11-02）
+# 礼物接收开源实现与登录态证据复核（2026-11-02，分析轮）
+
+用户反馈真实评论回复已可用，礼物感谢仍不工作，要求先查帖子/开源实现。本轮仅分析和更新本文，没有修改采集代码、运行新 probe、读取登录凭据或操作主直播。
+
+## 基线与本地核对
+
+- 开工 pwd / branch / status 正确且干净；从 39064db 快进合入最新 main **be628e125caa855ba708f6222aa5cb42171658ee**，阅读第十轮集成交接。保留凭据工厂 credentialMode 元数据读取断言修补和所有已有采集保护。
+- 当前 main 已实现显式 guest/external 选择，**默认 guest，但不再固定只能 guest**。外部凭据走既有 Java Provider / 原生 signer；是否已在用户运行中的 JVM 配置并生效，本轮没有检查，不能由源码默认值推断实际会话模式。
+- 当前 GIFT 分派、礼物模板、业务日志均存在；主窗口已有人工小心心连击 → 模板 → 测试语音/回执的证据，详见 phase10-integration.md。这不是用户真实礼物的证明。本轮没有找到“只因礼物是小心心或单价低就忽略”的分支。
+
+## 三个明确实现及适用证据
+
+本轮 GitHub 连接器和网络检索恢复可用，取得如下仓库近期提交并固定内容核对；只读源代码/说明，不安装、执行、复制第三方实现。代码存在、作者说明和 issue 用户报告是不同强度的证据，均不能替代本机真实验收。
+
+| 项目 / 固定 revision | 已核对的实现与实际报告 | 依赖与许可判断 |
+| --- | --- | --- |
+| **ymstar/dyhub**，77ab1fbb3ac6cb0886af40cf32865d998d9e6aab（2026-10-28） | [normalizer.ts](https://github.com/ymstar/dyhub/blob/77ab1fbb3ac6cb0886af40cf32865d998d9e6aab/src/pipeline/normalizer.ts) 明确将 WebcastGiftMessage 转为 gift，读取 giftId/name、repeatCount、comboCount、groupCount、repeatEnd、groupId。[Cookie 指南](https://github.com/ymstar/dyhub/blob/77ab1fbb3ac6cb0886af40cf32865d998d9e6aab/docs/cookie-guide.md) 明确描述匿名连接可收评论/入场/点赞，而礼物需要登录态；直连将凭据放握手头，浏览器内核注入浏览器上下文。这是项目的经验说明，不是官方平台规则 | Node.js ≥20，默认 Chrome/CDP 内核，另有轻量直连。[根许可证 MIT](https://github.com/ymstar/dyhub/blob/77ab1fbb3ac6cb0886af40cf32865d998d9e6aab/LICENSE)，但 [third_party/douyin-sign 声明](https://github.com/ymstar/dyhub/blob/77ab1fbb3ac6cb0886af40cf32865d998d9e6aab/third_party/douyin-sign/README.md) 明确两个签名 JS 来源于 AGPL-3.0；不能把根 MIT 或 vm 加载解释为这些资产许可已消失。不建议整体搬入 Java 仓库 |
+| **saermart/DouyinLiveWebFetcher**，40a904bdb0561a5a9c958a95634a29681cc4fbf4（2026-09-08） | [liveMan.py](https://github.com/saermart/DouyinLiveWebFetcher/blob/40a904bdb0561a5a9c958a95634a29681cc4fbf4/liveMan.py) 有 WebcastGiftMessage → _parseGiftMsg → GiftMessage.parse，读取礼物名称及 combo_count；该 revision 示例 WSS 头仍自动使用 ttwid，并非已把 issue 建议全部实现。[Issue #164](https://github.com/saermart/DouyinLiveWebFetcher/issues/164) 2026-05-06 报告换为已登录 Cookie 后可收到礼物，05-08 有成功反馈；07–10 月又有仅首条/过一段时间丢礼物的反馈，所以不能把它称为稳定保证 | Python + JS 签名执行；[AGPL-3.0](https://github.com/saermart/DouyinLiveWebFetcher/blob/40a904bdb0561a5a9c958a95634a29681cc4fbf4/LICENSE)。只读行为参考，不复制 sign.js、解析代码或固定历史连接参数 |
+| **jwwsjlm/douyinLive**，af34f7c2ea2c4df90c6f4659e967fb31815d9255（2026-10-23） | [库订阅说明](https://github.com/jwwsjlm/douyinLive/blob/af34f7c2ea2c4df90c6f4659e967fb31815d9255/docs/library.md) 明确支持 WebcastGiftMessage 按 method 订阅，[客户端处理示例](https://github.com/jwwsjlm/douyinLive/blob/af34f7c2ea2c4df90c6f4659e967fb31815d9255/docs/websocket-client.md) 读取礼物对象。[Issue #67](https://github.com/jwwsjlm/douyinLive/issues/67) 2026-09-13 报告仅首次礼物，其他消息正常，评论中提及账号/浏览器也存在类似现象。issue 已关闭但未提供可核验的修复提交/对照结果，不能仅凭关闭状态认定解决 | Go / Protobuf；[MIT](https://github.com/jwwsjlm/douyinLive/blob/af34f7c2ea2c4df90c6f4659e967fb31815d9255/LICENSE)。这是现有 Java 原生 signer 的已审计来源，本轮确认近期提交仍为此前采用的 revision；无需为了礼物解析改换 Go 服务 |
+
+这些均是非官方网页采集。未采用第三方文档中的风控绕过、多账号并发、自动换号等建议；没有寻找或使用他人的 Cookie。自动匿名 Cookie 只能建立游客会话，不能代替用户授权的登录状态。
+
+## 更新后的判断与下一步
+
+1. **游客/账号会话下的平台消息分发差异，是当前优先验证假设。** 新找到的项目指南和同类 issue 使它比上一轮只有“Gift=0”的推测更有依据；仍不能宣称已确认是本机根因。此前 60 秒游客窗口只有 2 条评论且 giftMethod=0，没有同步确认当时发生自然礼物，不能将其当作“送礼却未下发”的控制实验。
+2. 先看实际运行日志中的 `douyin_connection_selected mode` / `collector_inbound credentials`。如果仍为 GUEST，应利用已集成的 external 模式在后端本地注入用户自己的同会话凭据做一次有界只读对照。无需先改 Java/换 Python/增加 JS；Cookie 不发送到聊天、Git 或日志，格式通过也不等于平台有效登录。
+3. 对照需要同一直播时段的自然送礼事实、登录网页自身是否显示礼物、Java 的 giftMethod 及失败计数。若网页有礼物而 Java 没有，再查握手凭据、页面/IM 初始化差异；若 giftMethod>0，沿 parse → normalize → dedup/queue → SINK_RETURNED → gift_trace 的 RECEIVED/拒绝原因/模板/播放定位。登录网页也没有时，不能把问题限定为 Java 解析。
+4. external 仍为 0 不能直接推断 Cookie 过期或原生 signer 错误。社区已报告登录后不稳定，且网页 API 无完整性保证；不得无限重连、换号或反复买礼物。需要验证码/权限确认时由用户处理。
+5. Chrome/CDP 被动观察是一个有明确实现的后备对照手段，但会引入浏览器进程和生命周期，不作为本轮实现决策。仍优先现有原生 Java 接收 + 合法本地登录态验证；没有新增依赖/公共接口提案。
+
+验证与交付：本轮没有代码改动，因此未重跑后端/前端测试、未重新打包。检查源码与固定版本来源、git diff --check 通过；只提交本文，提交 SHA 见最终回复。没有新增真实评论/礼物/感谢链路验收结论。第十轮主窗口既有 284 项测试结果保留原有归属，不冒充本轮运行。
+
+---
+
+# 小心心未进入感谢流程：礼物阶段诊断交接（2026-11-02，前一轮）
 
 本节为最新交接。**已修复诊断缺口；尚未确认用户此前送“小心心”没有感谢的根因，也未验收真实礼物。** 下方入站解码和页面初始化记录是历史轮次，不能当成本轮送礼证据。
 
