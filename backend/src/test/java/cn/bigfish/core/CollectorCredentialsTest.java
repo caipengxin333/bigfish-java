@@ -32,7 +32,13 @@ class CollectorCredentialsTest {
         int guestCalls, externalCalls;
         WebDouyinConnectionProvider.CredentialSource source;
         DouyinSigner signer;
-        final WebDouyinConnectionProvider provider=org.mockito.Mockito.mock(WebDouyinConnectionProvider.class);
+        final WebDouyinConnectionProvider provider=org.mockito.Mockito.mock(WebDouyinConnectionProvider.class,invocation -> {
+            // The collector-local enum is package-private. Return real enum metadata, never invoke transport.
+            if(invocation.getMethod().getName().equals("credentialMode"))
+                return Arrays.stream(invocation.getMethod().getReturnType().getEnumConstants())
+                    .filter(value -> ((Enum<?>)value).name().equals(externalCalls>0 ? "EXTERNAL" : "GUEST")).findFirst().orElseThrow();
+            return RETURNS_DEFAULTS.answer(invocation);
+        });
         Factory(Function<String,String> env, CoreRig.MutableClock clock) { super(env,clock); }
         @Override protected WebDouyinConnectionProvider guestProvider(DouyinSigner signer) {
             guestCalls++; this.signer=signer; return provider;

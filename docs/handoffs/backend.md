@@ -1,3 +1,92 @@
+# 管理页运行时采集凭据：公共接口提案与内部接线（2026-11-02，本轮）
+
+本轮从干净的 `feature/backend-core` 快进同步 main `be628e125caa855ba708f6222aa5cb42171658ee`。实现与测试提交 **`b3cc53f72506d0d3c143c29c128992cf07ef6e06`**（`feat(backend): add runtime collector credentials and bounded connection checks`）。下列接口/DTO **仅为提案，等待主集成确认**；本分支没有修改 contract/OpenAPI/frontend，没有注册临时公开端点。内部服务、资源互斥、测试及采集适配边界已实现；**现在还不能通过已有管理页面填写 Cookie**。文档单独提交，最终文档 SHA 见最终回复或 `git log -1 --format=%H -- docs/handoffs/backend.md`。
+
+## 提议的 HTTP/DTO 与页面行为
+
+| 操作 | 提议接口 | 请求/响应要点 |
+| --- | --- | --- |
+| 查询配置 | `GET /api/v1/douyin/credentials` | 只返回 mode、source（DEFAULT/ENVIRONMENT/RUNTIME）、version、revision（不透明 CAS 标识，进程重启改变）、updatedAt、cookieConfigured、localExpiresAt、validation、identityMode（AUTO/MANUAL）、activeUse/activeVersion；不返回 Cookie/UA/UID 或其片段 |
+| 切换游客 | `PUT /api/v1/douyin/credentials/mode` | `{expectedRevision, mode:"GUEST"}`；保存运行时 guest 覆盖并移除当前运行时 Cookie，屏蔽环境 external；不隐式恢复环境配置 |
+| 明确替换 Cookie | `PUT /api/v1/douyin/credentials/cookie` | `{expectedRevision, replace:true, cookie, userAgent, localLifetimeSeconds或localExpiresAt, userUniqueIdOverride?}`；Cookie/UA 非空，期限二选一，手工 UID 可选且只能数字；空 Cookie 报错，不表示清除，不保留旧 Cookie 混搭新字段；保存后 mode=EXTERNAL |
+| 明确清除 | `POST /api/v1/douyin/credentials/clear` | `{expectedRevision, confirm:true}`；保存运行时 guest 墓碑配置，禁止回落旧环境 Cookie。默认不提供恢复环境按钮；后端重启后才重新读取启动环境 |
+| 启动采集检查 | `POST /api/v1/douyin/credentials/checks` | `{expectedRevision, roomId, durationSeconds}`；只用已保存凭据，返回 checkId、配置版本、状态、固定原因，不接入 EventIngress/LLM/TTS。1–30 秒、一次解析/WSS 尝试、30 秒冷却、每 5 分钟最多 3 次 |
+| 查询/取消检查 | `GET /api/v1/douyin/credentials/checks/{checkId}`；`POST .../{checkId}/cancel` | 查询当前检查或最近完成的一次；分别给出 localValidation、connected、comments、gifts、resourcesReleased、终态、固定原因和 cleanupError。取消 JSON 为 `{}`；重复取消幂等，旧 checkId 不能取消新检查 |
+
+期限语义：建议页面选择“本机允许使用 1 小时/8 小时”或明确日期时间；前端把用户当地时间转换为含时区的 RFC3339 日期，后端统一为 UTC Instant；内部已限定新保存期限 1 分钟–7 天。**这是本机使用截止时间，不是平台 Cookie 有效期，不自动续期/登录。** 查询不延长期限、不联网。external 互动由现有 250 ms 会话调度检查到期并停止，检查由 50 ms 调度停止；不是精确到毫秒的即时撤销。已发生的其他终止原因优先，不能被后来的到期覆盖；MOCK 不会因保存的 Cookie 到期而停止。运行时配置在 Java 内存，不因页面刷新丢失；Java 重启后消失，重新采用 ENVIRONMENT 或 DEFAULT，revision/来源明确变化。
+
+更新、清除、切换、检查与互动启动共用互斥使用权。任何 MOCK/DOUYIN 互动活动中返回 409 `SESSION_ACTIVE` 并由前端提示“先停止互动”；采集资源仍退出时保留 `COLLECTOR_STOPPING`。检查占用时返回 `CHECK_ACTIVE/CHECK_STOPPING`；CAS 冲突 `CREDENTIAL_CONFIG_CONFLICT`。固定码沿现有错误结构提议映射，不能把异常 message/cause 返回前端。每次互动固定一份不可变凭据版本，重连不读取后续配置。
+
+## 本地管理访问保护提案
+
+当前项目默认绑定 127.0.0.1，WebSocket 有同源保护，但 REST 未发现统一 Origin/CSRF 保护。敏感端点应统一接入本轮内部 `LocalManagementAccess` 校验：直连地址和 Host 都必须是本机回环；不信任转发头；拒绝跨站 Fetch Metadata；写入必须有精确同源 Origin（禁止 null/缺失/多值）及 `X-BigFish-Local-Management: 1`，JSON 写入限定 application/json；查询也要求自定义头且禁止跨站来源。响应 Cache-Control: no-store，不开放跨域 CORS，不记录请求体，不把请求绑定异常或供应商原文传给页面。Vite 同源代理应保留 Host/Origin；若将来需要代理/远程部署，由主窗口单独确认信任边界。本轮只提供可测试内部校验器，不改现有普通 API 的访问行为。
+
+主窗口接线时还应限制该请求体（建议 32 KiB）、敏感写入 DTO 使用 write-only 字段及脱敏 toString、校验失败返回固定码，不输出 binding rejectedValue。Cookie 最长 16384 字符、UA 最长 2048、UID 覆盖最多 30 位数字；拒绝 Cookie/UA 中 CR/LF。前端不将 Cookie 放入 URL、localStorage、配置导出或错误上报；表单替换/清除需明确操作。`LocalManagementAccess` 不是整站认证系统，不保护用户主动开放到公网的旧普通端点；本轮没有扩展其影响范围。
+
+## 采集层待确认边界
+
+现有公开 `WebDouyinConnectionProvider` external 入口仍要求完整 DouyinCredentials，身份解析/校验方法不是管理层可调用的公共入口。本轮不会解析页面、从 Cookie 猜 UID、仿造访客身份或复制协议实现。请采集窗口提出、主集成确认接受 Cookie/UA/本机期限/可选 UID 覆盖的入口，并明确自动解析与手工覆盖的校验、整体期限、取消和资源释放接口。确认前无 UID 的配置可保存为 `IDENTITY_RESOLUTION_REQUIRED`，实际连接明确拒绝 `IDENTITY_RESOLVER_UNAVAILABLE`；手工覆盖继续复用现有 provider，但只代表本地格式通过，不声称平台身份已验证。连接检查沿用既有采集器，通过受限工厂调用，不新增协议实现。
+
+## 已实现与文件范围
+
+- `configuration/DouyinCredentialSettings.java`：仅内存的单份配置和独占 Lease。优先级为 **RUNTIME > 启动时捕获的 ENVIRONMENT > DEFAULT guest**。没有运行时覆盖时继续使用原 probe 同名环境变量。环境变量仍只在 Java 启动时读取；guest 不读取四项秘密。新互动捕获不可变 Snapshot，provider 的 CredentialSource 闭包固定该快照，后续重连不混入新配置。
+- 显式 guest 或 clear 都创建 RUNTIME guest 覆盖、移除所选快照中的 Cookie，不回读/重新启用环境 external。后端重启不会删除操作系统环境变量；启动时若仍配 external，它将重新生效。界面必须显示 SOURCE=ENVIRONMENT、新 revision 和 version=0，不能沿用旧页面的“已清除/已保存”提示。
+- `View` 只有安全元数据。`version` 在本进程从 0 递增；`revision` 每次修改及进程重建都变化，用于 CAS。`updatedAt` 是后端加载/修改时间，不是平台登录时间。`cookieConfigured` 只表示当前快照持有非空 Cookie，不证明有效；`LOCAL_VALID` 不等于登录成功。secret Snapshot、Lease、Settings 的 JSON/toString 都固定为 redacted，没有 secret getter 或历史配置表。Java String 不承诺物理内存擦除。
+- `configuration/SessionCollectors.java`、`CoreConfiguration.java`：Spring 单例内存配置与现有工厂接线。保留旧构造方法、`douyin(Predicate)` 和测试工厂覆盖方式；新增内部 `check(Snapshot)`，用既有 provider/collector 并限制最多一次 provider.resolve，第二次拒绝 ATTEMPT_LIMIT。一次 resolve 可能包含既有首页/房间等多个 HTTP 请求，不声称总 HTTP 次数为 1。
+- `management/SessionService.java`：在任何 MOCK/DOUYIN 分配模型/语音/采集前取得互动使用权。运行、启动或采集退出期间不能修改；正常停止/失败且资源确认释放后才解锁。部分启动失败也释放或保留相应门禁；replay 不更换配置版本。新增 external 本机期限到期停止，保留原故障优先级、房间/会话/播放租约隔离。
+- `management/DouyinConnectionChecks.java`：内部、懒启动、采集专用；构造/轮询不联网，无 RuntimeEngine/ConversationPort/SpeechPort 依赖。检查与互动共用使用权，不能并发建立第二套连接；只是本地计数回调，不进入 EventIngress。每次 1–30 秒，30 秒冷却，每 5 分钟最多 3 次，时间戳队列最多 3 个；期限同时检查 Clock 与单调时钟。无自动重试；第一轮 RECONNECTING 即结束，工厂仍有单次 resolve 硬门禁。
+- 检查只保存当前资源和最近一次终态元数据，不保留用户内容。COMMENT/GIFT 独立饱和计数；`connected` 来自采集 CONNECTED 状态/计数，`COMPLETED` 只表示观察结束，不能当作已收到评论或礼物。取消先关闭回调，再异步清理；启动返回前不会提前 stop 然后重新 start；旧 checkId/旧回调不能改新结果。已知失败只返回枚举原因，未知异常统一 CHECK_START_FAILED/CHECK_FAILED 等。
+- 两个上限为 1、无等待队列的内部执行器负责 start 和 stop，闲置线程 30 秒退出；它们是服务级复用资源，不是每次检查新增线程。另由既有 collector 持有其有界采集资源。`resourcesReleased` 要求启动/停止调用已返回且 collector 线程、连接、HTTP 与签名 worker 确认退出。非配合端口未退出时保持 CHECK_STOPPING，不清空门禁、不再分配新连接。关闭服务有 500 ms 有界等待，迟到启动仍走原唯一清理执行器；不会伪报资源已释放。
+- `management/LocalManagementAccess.java`：仅内部来源/内容类型检查器，没有过滤器/Controller 注册；需要主窗口在批准的敏感路径调用。保持现有普通 API/页面/音频/WS 行为。
+- core 测试新增 `RuntimeCredentialSettingsTest`、`RuntimeCredentialSessionTest`、`RuntimeCredentialWiringTest`、`DouyinConnectionChecksTest`、`LocalManagementAccessTest`，共 **22 项**；`DouyinSessionTest` 只增加时钟注入测试构造方法，`CollectorCredentialsTest` 只修正替身的合法模式元数据返回，原精确调用断言保留。
+
+未修改 collector 包、前端、公共 contract/OpenAPI、POM、数据库结构、模型/语音/播放实现；旧 Live2D/礼物诊断/PCM→WAV/STATIC-RAM 成果不变。`/api/v1/douyin/credentials` 当前实际返回 404，已有普通 config/bootstrap/runtime/providers 也没有加入秘密或新凭据字段。
+
+## 主窗口内部接线示例（不是已发布 HTTP）
+
+以下调用直接针对已经注册的后端单例，不需要重启 Java；由主窗口确认公共 DTO 后在 Controller 转换，不能把内部 Snapshot/Lease 暴露给浏览器：
+
+```java
+// 新敏感 Controller 入口必须先校验请求；GET 用 false，JSON 写入用 true。
+new LocalManagementAccess().require(servletRequest, true);
+sessions.reconcile(); // 只协调本机资源，及时解除已经退出的旧采集门禁。
+
+var before = credentialSettings.status(); // 映射为主窗口维护的只读 DTO，响应 no-store。
+credentialSettings.replace(expectedRevision, true, requestCookie, requestUserAgent,
+    optionalManualUserUniqueId, Duration.ofHours(1), null); // 或 lifetime=null + 明确 Instant。
+credentialSettings.guest(expectedRevision);            // 显式游客；两个操作不是顺序执行示例。
+credentialSettings.clear(expectedRevision, true);      // 显式清除；空文本不能替代此操作。
+
+var check = connectionChecks.start(expectedRevision, savedWebRoomId, Duration.ofSeconds(15));
+var evidence = connectionChecks.status(check.checkId());
+connectionChecks.cancel(check.checkId());
+```
+
+实际依赖名：`DouyinCredentialSettings`、`DouyinConnectionChecks` 都由 CoreConfiguration 注册；前者与 `SessionCollectors.settings()` 是同一对象。别另造一个 store；HTTP 写入和 SessionService 启动必须共用该对象。`Failure.status/code` 由新 Controller/异常处理映射，**当前没有给它新增公共错误处理或公开路由**。交互中的修改提示“先停止互动”；CHECK_STOPPING/COLLECTOR_STOPPING 提示资源仍在退出。不能在冲突时强制覆盖配置或主动停止已有互动。
+
+`activeUse` 内部值为 NONE/INTERACTION/INTERACTION_STOPPING/CHECK/CHECK_STOPPING；INTERACTION_STOPPING 的写入冲突码为 COLLECTOR_STOPPING。查询 `localValidation` 是检查开始时的本地证据，终态 `reason` 可随后是 CREDENTIALS_EXPIRED；两者不冲突。检查的 collector 入站日志因使用限次 provider 包装可能显示 credentials=UNSPECIFIED；准确模式/来源在工厂选择日志和 check View 中。主会话仍用原 Web provider，GUEST/EXTERNAL 入站元数据不变；未为此越界修改 collector。
+
+## 实测、提交与未验证项
+
+| 验证 | 实际结果 |
+| --- | --- |
+| `./scripts/maven.sh -B -ntp -pl backend '-Dtest=RuntimeCredential*Test,DouyinConnectionChecksTest,LocalManagementAccessTest,CollectorCredentialsTest,DouyinSessionTest' test` | 最终 **38/38** 通过，2026-11-02 23:54:40 +08:00；`/tmp/bigfish-runtime-credentials-targeted-final.log` |
+| `./scripts/maven.sh -B -ntp test` | 最终 **306 项：304 通过、2 项真实 NLS/Token 默认跳过，0 failure/error**，23:56:22 +08:00，26.776 秒；`/tmp/bigfish-runtime-credentials-full-final.log` |
+| 来源/写入 | 环境兼容、RUNTIME 优先、显式 guest/clear 屏蔽旧环境、后端重建恢复环境和新 revision、空输入/显式替换/清除确认/CAS、日期/时长及到期、并发保存与启动只有一个一致版本 |
+| 生命周期 | MOCK 也阻止凭据修改；DOUYIN 固定版本、重连来源冻结、停止资源未退保持门禁、下次互动取新版本、旧回调隔离、到期停止 external、原终止原因不被后续到期覆盖 |
+| 检查 | 本地有效/已连接/评论/礼物分层证据；超时、冷却、5 分钟限额恢复；取消不阻塞调用者、重复取消、旧 ID/迟到事件隔离；未释放资源禁止修改/互动；不配合的启动返回后正确清理；服务关闭后的迟到启动清理；provider 实际调用最多一次 |
+| 安全 | secret 对象序列化脱敏；普通 config/bootstrap/runtime/providers 和 SQLite 没有 Cookie/UA/UID；敏感路由仍 404；跨站、null/缺失/多值 Origin、非回环 Host/来源、转发头、缺少自定义头、非 JSON 写入均被内部 guard 拒绝 |
+| 既有保护 | 主线所有配置/CAS、采集、模型、语音、租约、WebSocket、礼物与 Live2D 回归通过；原断言未删除/弱化 |
+| 差异 | `git diff --check` / staged check 通过；禁止修改目录没有差异；交付前 main 仍为 be628e1，祖先检查通过 |
+
+中途专项发现：新测试在 stop 返回时立即要求线程退出，已改为有界等待并保留释放断言；旧 Mockito provider 的包内 credentialMode 返回 null，后台诊断线程会 NPE（此前基线测试日志也存在），现只返回合法枚举，仍精确只允许一次元数据调用，其余网络/签名/凭据调用必须懒加载。最终日志没有后台线程异常。末次补充本机期限晚于引擎终止时不伪造采集失败，针对性与完整回归均通过。
+
+本轮只用人工秘密、可控时钟、本机替身/回环和临时 SQLite；**未读用户 Cookie、未真实连接抖音、未调用模型/语音/Token 收费接口、未启动或停止主项目服务**。没有额外打包或浏览器页面联调。测试在授权沙箱外执行以支持 Mockito attach/本机回环端口。
+
+仍待主集成确认/接线：上述 HTTP/DTO 与敏感访问保护、前端输入/来源/期限展示；采集窗口的自动 user_unique_id 获取及覆盖值校验入口。自动身份路线当前明确不可连接，手工覆盖路线仅本地校验，真实登录/连接/评论/礼物均未在本轮验证。新采集入口确认后需调整 Snapshot 的身份能力校验以及 SessionCollectors/provider 适配，再补同一整体期限下的取消/资源回归；不得只移除 ID 校验。没有跨窗口消息、推送、PR 或对 main 的更新。
+
+---
+
 # 显式采集凭据与礼物业务追踪交接（2026-11-02）
 
 本节为本轮最新交付，下方历史内容保留。工作树 `bigfish-worktrees/backend`，分支 `feature/backend-core`。
