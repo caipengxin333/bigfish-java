@@ -22,6 +22,7 @@ public final class WebDouyinConnectionProvider implements DouyinConnectionProvid
     private final Duration signingTimeout;
     private final DouyinGuestSession guest;
     private volatile Thread signingWorker;
+    private volatile InboundDiagnostics.CredentialEvidence credentialEvidence = InboundDiagnostics.CredentialEvidence.NONE;
     private final java.util.concurrent.atomic.AtomicLong signingAttempts = new java.util.concurrent.atomic.AtomicLong();
 
     public WebDouyinConnectionProvider(CredentialSource credentials, DouyinSigner signer) {
@@ -56,6 +57,7 @@ public final class WebDouyinConnectionProvider implements DouyinConnectionProvid
     }
 
     @Override public DouyinConnection resolve(String input, String expectedInternalRoomId) throws Exception {
+        credentialEvidence = InboundDiagnostics.CredentialEvidence.NONE;
         DouyinRoomInput requested = DouyinRoomInput.parse(input);
         DouyinCredentials current;
         DouyinRoom room;
@@ -63,14 +65,18 @@ public final class WebDouyinConnectionProvider implements DouyinConnectionProvid
             requireSigner(signer);
             var access = guest.resolve(requested.webRoomId(), expectedInternalRoomId);
             current = access.credentials(); room = access.room();
+            if (current != null) credentialEvidence = new InboundDiagnostics.CredentialEvidence(true, false, InboundDiagnostics.VisitorSource.PAGE);
         } else {
             try { current = credentials.current(); }
             catch (RuntimeException exception) { throw new DouyinFailure(CREDENTIALS_INVALID); }
             if (current == null) throw new DouyinFailure(CREDENTIALS_MISSING);
-            current.validate(clock.instant());
+            current.validateForResolution(clock.instant());
+            credentialEvidence = new InboundDiagnostics.CredentialEvidence(true, current.hasLoginFields(), InboundDiagnostics.VisitorSource.UNRESOLVED);
             // Do not touch the platform when receive cannot proceed. Room-only validation uses resolver directly.
             requireSigner(signer);
-            room = resolver.resolve(requested.webRoomId(), current);
+            var access = resolver.resolveExternal(requested.webRoomId(), current, expectedInternalRoomId);
+            room = access.room(); current = access.credentials();
+            credentialEvidence = new InboundDiagnostics.CredentialEvidence(true, credentialEvidence.loginFieldsPresent(), access.visitorSource());
         }
         if (expectedInternalRoomId != null && !expectedInternalRoomId.equals(room.internalRoomId())) {
             return DouyinConnection.ended(room.internalRoomId());
@@ -150,5 +156,6 @@ public final class WebDouyinConnectionProvider implements DouyinConnectionProvid
     InboundDiagnostics.Credentials credentialMode() {
         return guest == null ? InboundDiagnostics.Credentials.EXTERNAL : InboundDiagnostics.Credentials.GUEST;
     }
+    InboundDiagnostics.CredentialEvidence credentialEvidence() { return credentialEvidence; }
     @Override public String toString() { return "WebDouyinConnectionProvider[redacted]"; }
 }

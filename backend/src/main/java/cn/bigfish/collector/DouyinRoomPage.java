@@ -32,11 +32,11 @@ final class DouyinRoomPage {
                 if (RENDER.matcher(scripts.group(1)).find()) {
                     // URLDecoder's '+' conversion is not appropriate to encodeURIComponent hydration.
                     source = URLDecoder.decode(source.replace("+", "%2B"), StandardCharsets.UTF_8);
-                    scan(source, requested, found);
+                    scan(jsonEntities(source), requested, found);
                 } else if (source.startsWith("self.__pace_f.push(")) {
                     int begin = source.indexOf('['), end = source.lastIndexOf(']');
                     if (begin >= 0 && end > begin) scanStrings(JSON.readTree(source.substring(begin, end + 1)), requested, found, 0);
-                } else if (source.startsWith("{")) scan(source, requested, found);
+                } else if (source.startsWith("{")) scan(jsonEntities(source), requested, found);
             } catch (DouyinFailure failure) { throw failure; }
             catch (Exception ignored) { throw new DouyinFailure(PAGE_STRUCTURE_CHANGED); }
         }
@@ -56,6 +56,19 @@ final class DouyinRoomPage {
 
     /** Read only an explicit visitor field in supported hydration, never an anchor ID or a generated fallback. */
     static String guestId(String html) throws DouyinFailure {
+        try {
+            String id = visitorId(html);
+            if (id == null) throw new DouyinFailure(GUEST_ID_MISSING);
+            return id;
+        } catch (DouyinFailure failure) {
+            if (failure.code() == EXTERNAL_ID_INVALID || failure.code() == EXTERNAL_ID_CONFLICT)
+                throw new DouyinFailure(PAGE_STRUCTURE_CHANGED); // Keep guest error compatibility.
+            throw failure;
+        }
+    }
+
+    /** Null means no explicit visitor field. Malformed/conflicting fields never become a missing field. */
+    static String visitorId(String html) throws DouyinFailure {
         checkGate(html);
         var ids = new java.util.HashSet<String>();
         var scripts = SCRIPTS.matcher(html);
@@ -69,12 +82,11 @@ final class DouyinRoomPage {
                     if (begin < 0 || end <= begin) throw new DouyinFailure(PAGE_STRUCTURE_CHANGED);
                     source = source.substring(begin, end + 1);
                 } else if (!source.startsWith("{")) continue;
-                collectGuestIds(JSON.readTree(source), ids, 0);
+                collectGuestIds(JSON.readTree(jsonEntities(source)), ids, 0);
             } catch (DouyinFailure failure) { throw failure; }
             catch (Exception ignored) { throw new DouyinFailure(PAGE_STRUCTURE_CHANGED); }
         }
-        if (ids.isEmpty()) throw new DouyinFailure(GUEST_ID_MISSING);
-        return ids.iterator().next();
+        return ids.isEmpty() ? null : ids.iterator().next();
     }
 
     private static void collectGuestIds(JsonNode node, java.util.Set<String> ids, int depth) throws Exception {
@@ -88,10 +100,10 @@ final class DouyinRoomPage {
                     JsonNode value = field.getValue();
                     String id = value.asText("");
                     if ((!value.isTextual() && !value.isIntegralNumber()) || !id.matches("[1-9][0-9]{0,29}")) {
-                        throw new DouyinFailure(PAGE_STRUCTURE_CHANGED);
+                        throw new DouyinFailure(EXTERNAL_ID_INVALID);
                     }
                     ids.add(id);
-                    if (ids.size() > 1) throw new DouyinFailure(PAGE_STRUCTURE_CHANGED);
+                    if (ids.size() > 1) throw new DouyinFailure(EXTERNAL_ID_CONFLICT);
                 } else collectGuestIds(field.getValue(), ids, depth + 1);
             }
         } else if (node.isArray()) {
@@ -101,15 +113,23 @@ final class DouyinRoomPage {
             // Next/pace stream chunks may prefix JSON with a numeric chunk identifier.
             source = source.replaceFirst("^[0-9]{1,8}:", "");
             if ((source.startsWith("{") || source.startsWith("[")) && source.contains("user_unique_id")) {
-                collectGuestIds(JSON.readTree(source), ids, depth + 1);
+                collectGuestIds(JSON.readTree(jsonEntities(source)), ids, depth + 1);
             }
         }
     }
 
     private static void scanStrings(JsonNode node, DouyinRoomInput request, List<DouyinRoom> found, int depth) throws Exception {
         if (depth > 16) throw new DouyinFailure(PAGE_STRUCTURE_CHANGED);
-        if (node.isTextual()) scan(node.textValue(), request, found);
+        if (node.isTextual()) scan(jsonEntities(node.textValue()), request, found);
         else if (node.isContainerNode()) for (JsonNode child : node) scanStrings(child, request, found, depth + 1);
+    }
+
+    // Only decode an explicitly entity-quoted JSON object, once. Ordinary script JSON and its text
+    // values remain untouched; this never evaluates script or expands arbitrary HTML attributes.
+    private static String jsonEntities(String source) {
+        if (!source.matches("(?s)^\\s*(?:[0-9]{1,8}:)?\\{\\s*(?:&quot;|&#34;|&#x22;).*")) return source;
+        return source.replace("&quot;", "\"").replace("&#34;", "\"").replace("&#x22;", "\"")
+                .replace("&lt;", "<").replace("&gt;", ">").replace("&apos;", "'").replace("&amp;", "&");
     }
 
     private static void scan(String source, DouyinRoomInput request, List<DouyinRoom> found) throws Exception {

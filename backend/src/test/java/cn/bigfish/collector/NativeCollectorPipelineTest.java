@@ -17,15 +17,20 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Actual JDK HTTP/WebSocket, native signing and event delivery; all peer data is synthetic and loopback-only. */
 class NativeCollectorPipelineTest {
     @Test void nativeSigningThroughLocalTransportDeliversNormalizedEventsAckHeartbeatAndEnded() throws Exception {
-        verifyPipeline(false);
+        verifyPipeline(false, false);
     }
 
     @Test void roomOnlyGuestBootstrapDeliversEventsThroughActualLocalJdkTransport() throws Exception {
-        verifyPipeline(true);
+        verifyPipeline(true, false);
     }
 
-    private void verifyPipeline(boolean guest) throws Exception {
-        byte[] html = (guest ? DouyinRoomResolverTest.fixture("pace-bootstrap") : DouyinGuestSessionTest.guestPage("9001")).replace("7000000000000000001", "123").getBytes(StandardCharsets.UTF_8);
+    @Test void externalAutoVisitorAndFullLoginCookieReachActualHttpAndWebSocketPeers() throws Exception {
+        verifyPipeline(false, true);
+    }
+
+    private void verifyPipeline(boolean guest, boolean automatic) throws Exception {
+        String visitor = automatic ? "9001" : "9000000000000000001";
+        byte[] html = (guest ? DouyinRoomResolverTest.fixture("pace-bootstrap") : DouyinGuestSessionTest.guestPage(visitor)).replace("7000000000000000001", "123").getBytes(StandardCharsets.UTF_8);
         var httpCalls = new AtomicInteger();
         var events = new CopyOnWriteArrayList<LiveEvent>();
         var defaults = CollectorOptions.defaults();
@@ -46,12 +51,18 @@ class NativeCollectorPipelineTest {
                 exchange.sendResponseHeaders(200, home.length); exchange.getResponseBody().write(home); exchange.close(); return;
             }
             if (guest) assertEquals("ttwid=synthetic-guest", exchange.getRequestHeaders().getFirst("Cookie"));
+            else {
+                assertEquals(DouyinExternalSessionTest.COOKIE, exchange.getRequestHeaders().getFirst("Cookie"));
+                assertEquals(DouyinExternalSessionTest.UA, exchange.getRequestHeaders().getFirst("User-Agent"));
+            }
             exchange.sendResponseHeaders(200, html.length); exchange.getResponseBody().write(html); exchange.close();
         }); var peer = new JdkCollectorSocketTest.LoopbackPeer()) {
             var fetcher = new DouyinRoomResolver.JdkPageFetcher(Duration.ofSeconds(2), 4096);
             var resolver = new DouyinRoomResolver(Clock.systemUTC(), (uri, headers) -> fetcher.get(http.uri().resolve(uri.getPath()), headers));
             var provider = guest ? WebDouyinConnectionProvider.guest(DouyinSigners.load(), resolver, Clock.systemUTC())
-                    : new WebDouyinConnectionProvider(DouyinRoomResolverTest::credentials, DouyinSigners.load(), resolver, Clock.systemUTC());
+                    : new WebDouyinConnectionProvider(() -> new DouyinCredentials(DouyinExternalSessionTest.COOKIE,
+                            DouyinExternalSessionTest.UA, automatic ? null : visitor, java.time.Instant.now().plusSeconds(300)),
+                            DouyinSigners.load(), resolver, Clock.systemUTC());
             var transport = new JdkCollectorSocket(options, new CollectorDiagnostics(), Clock.systemUTC());
             try (var collector = new DouyinCollector(provider, options, Clock.systemUTC(), () -> new CollectorSocket() {
                 public void open(DouyinConnection connection) throws Exception {
@@ -61,6 +72,8 @@ class NativeCollectorPipelineTest {
                         assertTrue(connection.endpoint.getRawQuery().contains("user_unique_id=9001&"));
                         assertEquals("ttwid=synthetic-guest", connection.headers.get("Cookie"));
                         assertEquals(DouyinGuestSession.USER_AGENT, connection.headers.get("User-Agent"));
+                    } else {
+                        assertTrue(connection.endpoint.getRawQuery().contains("user_unique_id=" + visitor + "&"));
                     }
                     // Test-only target substitution; production destination validation remains unchanged.
                     transport.openEndpoint(peer.uri(), connection.headers);
@@ -74,6 +87,10 @@ class NativeCollectorPipelineTest {
             })) {
                 collector.start("123456", "synthetic-native-pipeline", events::add);
                 await(() -> collector.state() == CollectorPort.State.CONNECTED);
+                if (!guest) {
+                    assertEquals(DouyinExternalSessionTest.COOKIE, peer.requestHeaders.get("cookie"));
+                    assertEquals(DouyinExternalSessionTest.UA, peer.requestHeaders.get("user-agent"));
+                }
                 peer.send(2, true, new byte[]{(byte) 0x80}); // Invalid push must not close the connection.
                 byte[] terminalGift = WireFixtures.gift(13, 456, 90, 3, false, true);
                 byte[] businessFrame = WireFixtures.frame(true, true, WireFixtures.chat(1),

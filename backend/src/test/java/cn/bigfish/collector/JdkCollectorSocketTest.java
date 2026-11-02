@@ -130,6 +130,7 @@ class JdkCollectorSocketTest {
         record ClientFrame(int opcode, byte[] bytes) { }
         final ServerSocket server = new ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
         final ArrayBlockingQueue<ClientFrame> received = new ArrayBlockingQueue<>(16);
+        final java.util.Map<String, String> requestHeaders = new java.util.concurrent.ConcurrentHashMap<>();
         final AtomicReference<Throwable> failure = new AtomicReference<>();
         final CountDownLatch ready = new CountDownLatch(1);
         final Thread worker;
@@ -143,6 +144,11 @@ class JdkCollectorSocketTest {
                     InputStream in = client.getInputStream();
                     var request = new ByteArrayOutputStream();
                     while (request.size() < 8192 && !request.toString(StandardCharsets.US_ASCII).endsWith("\r\n\r\n")) request.write(read(in));
+                    // Test-only loopback headers with invented credentials; never captures a platform URL.
+                    Arrays.stream(request.toString(StandardCharsets.US_ASCII).split("\r\n")).skip(1).forEach(line -> {
+                        String[] pair = line.split(":", 2);
+                        if (pair.length == 2) requestHeaders.put(pair[0].toLowerCase(java.util.Locale.ROOT), pair[1].strip());
+                    });
                     String key = Arrays.stream(request.toString(StandardCharsets.US_ASCII).split("\r\n"))
                             .filter(line -> line.toLowerCase(java.util.Locale.ROOT).startsWith("sec-websocket-key:"))
                             .findFirst().orElseThrow().split(":", 2)[1].trim();
