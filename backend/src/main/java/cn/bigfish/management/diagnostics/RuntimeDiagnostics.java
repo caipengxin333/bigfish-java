@@ -34,6 +34,7 @@ public final class RuntimeDiagnostics {
                            Map<Reason,Long> reasons, List<Trace> history, List<Task> tasks) {}
     private record Entry(LiveEvent.Type type, long version, Instant receivedAt, Trace latest) {}
     private final Clock clock;
+    private final java.util.function.Consumer<Trace> observer;
     private final LinkedHashMap<String,Entry> tasks = new LinkedHashMap<>();
     private final ArrayDeque<Trace> history = new ArrayDeque<>();
     private final EnumMap<Stage,Long> transitions = new EnumMap<>(Stage.class);
@@ -42,7 +43,10 @@ public final class RuntimeDiagnostics {
     private Instant received, modelSuccess, speechSuccess, playbackSuccess;
     private Trace lastFailure;
     private long sequence, taskEvictions, historyEvictions;
-    public RuntimeDiagnostics(Clock clock) { this.clock = Objects.requireNonNull(clock); }
+    public RuntimeDiagnostics(Clock clock) { this(clock,ignored -> {}); }
+    public RuntimeDiagnostics(Clock clock,java.util.function.Consumer<Trace> observer) {
+        this.clock=Objects.requireNonNull(clock); this.observer=Objects.requireNonNull(observer);
+    }
     public synchronized void begin(String sessionId) {
         session = Objects.requireNonNull(sessionId); tasks.clear(); history.clear(); transitions.clear(); reasons.clear();
         received = modelSuccess = speechSuccess = playbackSuccess = null; lastFailure = null;
@@ -77,6 +81,7 @@ public final class RuntimeDiagnostics {
         if (stage==Stage.SPEECH_COMPLETED) speechSuccess=now;
         if (stage==Stage.COMPLETED) playbackSuccess=now;
         if (stage==Stage.FAILED) lastFailure=trace;
+        observer.accept(trace);
         return true;
     }
     public synchronized Snapshot snapshot() {

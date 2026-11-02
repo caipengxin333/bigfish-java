@@ -111,17 +111,17 @@ public final class SessionService {
                 : collectors.douyin(room -> open.get() && engine.bindDouyinRoom(id,room));
             context.handle.port().start(requestedRoom,id,event -> {
                 // No SessionService lock here: stop can wait for these workers to exit.
-                if (!context.open.get()) return;
+                if (!context.open.get()) { engine.collectorIngressClosed(context.sessionId,event==null ? null : event.type()); return; }
                 var result=engine.accept(event);
                 if (result==EventIngress.Result.ACCEPTED) context.accepted.incrementAndGet();
                 else if (result!=EventIngress.Result.DUPLICATE) context.rejected.incrementAndGet();
             });
         } catch (RuntimeException failure) {
             open.set(false);
-            context.startupError="COLLECTOR_START_FAILED";
+            context.startupError=failure instanceof SessionCollectors.ConfigurationFailure known ? known.code() : "COLLECTOR_START_FAILED";
             engine.collectorFailed(id);
             retire(CollectorPort.State.FAILED);
-            throw new SessionException("COLLECTOR_START_FAILED",503);
+            throw new SessionException(failure instanceof SessionCollectors.ConfigurationFailure ? "DOUYIN_"+context.startupError : context.startupError,503);
         }
     }
     @Scheduled(fixedDelay = 250)

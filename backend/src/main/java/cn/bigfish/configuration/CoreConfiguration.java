@@ -2,6 +2,7 @@ package cn.bigfish.configuration;
 
 import cn.bigfish.conversation.*;
 import cn.bigfish.management.RuntimeEngine;
+import cn.bigfish.management.diagnostics.GiftTraceLog;
 import cn.bigfish.playback.*;
 import cn.bigfish.speech.LocalTestSpeech;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -16,7 +17,7 @@ import org.springframework.web.socket.config.annotation.*;
 @Configuration
 @EnableScheduling
 public class CoreConfiguration {
-    @Bean SessionCollectors sessionCollectors() { return new SessionCollectors(); }
+    @Bean SessionCollectors sessionCollectors(Environment env, Clock runtimeClock) { return new SessionCollectors(env::getProperty,runtimeClock); }
     @Bean Clock runtimeClock() { return Clock.systemUTC(); }
     @Bean AudioAssets audioAssets(@Value("${bigfish.data-dir}") String root, Clock clock) throws Exception {
         return new AudioAssets(Path.of(root,"audio"),clock);
@@ -25,11 +26,14 @@ public class CoreConfiguration {
         return new LocalTestSpeech(Path.of(root,"audio"));
     }
     @Bean PlaybackCoordinator playbackCoordinator(Clock clock, AudioAssets assets) { return new PlaybackCoordinator(clock,assets); }
+    @Bean(destroyMethod="close") GiftTraceLog giftTraceLog(@Value("${bigfish.data-dir}") String root,Environment env) {
+        return new GiftTraceLog(Path.of(root),"true".equals(env.getProperty("BIGFISH_GIFT_TRACE_PERSIST")));
+    }
     @Bean RuntimeEngine runtimeEngine(ConfigStore configs, LocalTestSpeech speech, PlaybackCoordinator playback,
-                                      AudioAssets assets, Clock clock, Environment env) {
+                                      AudioAssets assets, Clock clock, Environment env,GiftTraceLog giftTraceLog) {
         return new RuntimeEngine(configs,new MockConversation(),() -> DeepSeekConversation.create(
             env.getProperty("BIGFISH_ALLOW_PAID",Boolean.class,false),env.getProperty("BIGFISH_DEEPSEEK_API_KEY")),
-            speech,playback,assets,clock,Duration.ofSeconds(20),Duration.ofSeconds(5));
+            speech,playback,assets,clock,Duration.ofSeconds(20),Duration.ofSeconds(5),giftTraceLog);
     }
     @Bean StageSocketHandler stageSocketHandler(PlaybackCoordinator playback, ObjectMapper mapper) {
         return new StageSocketHandler(playback,mapper);
