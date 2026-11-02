@@ -64,11 +64,18 @@ final class InboundDiagnostics {
             java.util.Collections.unmodifiableMap(new LinkedHashMap<>(totals))); }
 
     enum Credentials { GUEST, EXTERNAL, UNSPECIFIED }
+    enum VisitorSource { UNRESOLVED, PAGE, MANUAL }
+    record CredentialEvidence(boolean localValid, boolean loginFieldsPresent, VisitorSource visitorSource) {
+        static final CredentialEvidence NONE = new CredentialEvidence(false, false, VisitorSource.UNRESOLVED);
+    }
     enum Level { DEBUG, INFO, WARN }
-    record Trace(long generation, long frame, int message, String method) {
+    record Trace(long generation, long frame, int message, String method, CredentialEvidence evidence) {
+        Trace(long generation, long frame, int message, String method) {
+            this(generation, frame, message, method, CredentialEvidence.NONE);
+        }
         Trace { method = safeMethod(method); }
-        Trace message(int index) { return new Trace(generation, frame, index, "UNREAD"); }
-        Trace method(String name) { return new Trace(generation, frame, message, name); }
+        Trace message(int index) { return new Trace(generation, frame, index, "UNREAD", evidence); }
+        Trace method(String name) { return new Trace(generation, frame, message, name, evidence); }
     }
     final class Scope implements AutoCloseable {
         private final Trace previous;
@@ -129,8 +136,13 @@ final class InboundDiagnostics {
         methods.put("OTHER_METHOD", 0L); methods.put("INVALID_METHOD", 0L);
     }
     synchronized void credentials(Credentials value) { credentials = value; }
+    synchronized void credentialEvidence(CredentialEvidence value) {
+        var safe = value == null ? CredentialEvidence.NONE : value;
+        if (!connection.evidence.equals(safe)) changes++;
+        connection = new Trace(connection.generation, 0, 0, "FRAME", safe);
+    }
     synchronized void nextConnection() { connection = new Trace(connection.generation + 1, 0, 0, "FRAME"); frames = 0; }
-    synchronized Trace nextFrame() { return new Trace(connection.generation, ++frames, 0, "FRAME"); }
+    synchronized Trace nextFrame() { return new Trace(connection.generation, ++frames, 0, "FRAME", connection.evidence); }
     Trace trace() { Trace trace = local.get(); return trace == null ? connection : trace; }
     Scope use(Trace trace) { return new Scope(trace); }
 
@@ -239,7 +251,12 @@ final class InboundDiagnostics {
     private long total(Stage stage, Reason reason, Kind kind) { return totals.getOrDefault(new Key(stage, reason, kind), 0L); }
     private Map<String, Object> base(Instant time, Trace trace) {
         var fields = new LinkedHashMap<String, Object>();
+        var credentialEvidence = trace.evidence;
         fields.put("time", time.toString()); fields.put("sessionId", session); fields.put("credentials", credentials.name());
+        fields.put("credentialValidation", credentialEvidence.localValid ? "LOCAL_VALID" : "NOT_CHECKED");
+        fields.put("loginFields", !credentialEvidence.localValid ? "NOT_CHECKED" : credentialEvidence.loginFieldsPresent ? "PRESENT" : "ABSENT");
+        fields.put("visitorSource", credentialEvidence.visitorSource.name());
+        fields.put("platformLogin", "UNVERIFIED");
         fields.put("generation", trace.generation); fields.put("frame", trace.frame);
         fields.put("message", trace.message); fields.put("method", trace.method);
         return fields;

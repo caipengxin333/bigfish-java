@@ -6,6 +6,17 @@ import static cn.bigfish.collector.DouyinFailure.Code.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class DouyinCollectorProbeTest {
+    @Test void externalProbeAllowsMissingManualVisitorButStillRequiresSourceUaCookieAndExpiry() throws Exception {
+        var env = new java.util.HashMap<>(Map.of("BIGFISH_DOUYIN_COOKIE", DouyinExternalSessionTest.COOKIE,
+                "BIGFISH_DOUYIN_USER_AGENT", DouyinExternalSessionTest.UA,
+                "BIGFISH_DOUYIN_CREDENTIALS_EXPIRES_AT", java.time.Instant.now().plusSeconds(60).toString()));
+        var credentials = DouyinCollectorProbe.credentials(env::get);
+        assertFalse(credentials.hasManualVisitor()); assertTrue(credentials.hasLoginFields());
+        env.put("BIGFISH_DOUYIN_USER_UNIQUE_ID", " ");
+        assertEquals(CREDENTIALS_INVALID, assertThrows(DouyinFailure.class, () -> DouyinCollectorProbe.credentials(env::get)).code());
+        env.remove("BIGFISH_DOUYIN_USER_UNIQUE_ID"); env.remove("BIGFISH_DOUYIN_USER_AGENT");
+        assertEquals(CREDENTIALS_MISSING, assertThrows(DouyinFailure.class, () -> DouyinCollectorProbe.credentials(env::get)).code());
+    }
     @Test void probeIsExplicitlyOptInAndDoesNotLoadSignerOrConnectWhenDisabled() {
         assertEquals(PROBE_DISABLED, assertThrows(DouyinFailure.class, () -> DouyinCollectorProbe.run(key -> null)).code());
         assertEquals(ROOM_REQUIRED, assertThrows(DouyinFailure.class, () ->

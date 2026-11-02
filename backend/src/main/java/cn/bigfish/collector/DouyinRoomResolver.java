@@ -34,10 +34,36 @@ public final class DouyinRoomResolver {
     public DouyinRoom resolve(String input, DouyinCredentials credentials) throws DouyinFailure, InterruptedException {
         DouyinRoomInput room = DouyinRoomInput.parse(input);
         if (credentials == null) throw new DouyinFailure(CREDENTIALS_MISSING);
-        credentials.validate(clock.instant());
+        credentials.validateForResolution(clock.instant());
         Page page = fetch(room.pageUri(), credentials.headers(room));
-        credentials.validate(clock.instant());
+        credentials.validateForResolution(clock.instant());
         return DouyinRoomPage.parse(page.body, room);
+    }
+
+    /** One immutable input snapshot supplies HTTP, visitor discovery, signing and WSS for this attempt. */
+    ExternalAccess resolveExternal(String input, DouyinCredentials credentials, String expectedRoom)
+            throws DouyinFailure, InterruptedException {
+        DouyinRoomInput requested = DouyinRoomInput.parse(input);
+        if (credentials == null) throw new DouyinFailure(CREDENTIALS_MISSING);
+        credentials.validateForResolution(clock.instant());
+        Page page = fetch(requested.pageUri(), credentials.headers(requested));
+        credentials.validateForResolution(clock.instant());
+        DouyinRoom room = DouyinRoomPage.parse(page.body, requested);
+        if (!room.live() || expectedRoom != null && !expectedRoom.equals(room.internalRoomId()))
+            return new ExternalAccess(room, null, InboundDiagnostics.VisitorSource.UNRESOLVED);
+        String visitor = DouyinRoomPage.visitorId(page.body);
+        boolean manual = credentials.hasManualVisitor();
+        if (manual && visitor != null && !visitor.equals(credentials.userUniqueId()))
+            throw new DouyinFailure(EXTERNAL_ID_CONFLICT);
+        if (manual) visitor = credentials.userUniqueId();
+        if (visitor == null) throw new DouyinFailure(EXTERNAL_ID_MISSING);
+        var resolved = credentials.withVisitor(visitor);
+        resolved.validate(clock.instant());
+        // Do not replace any caller-provided cookie from Set-Cookie or fall back to guest bootstrap.
+        return new ExternalAccess(room, resolved, manual ? InboundDiagnostics.VisitorSource.MANUAL : InboundDiagnostics.VisitorSource.PAGE);
+    }
+    record ExternalAccess(DouyinRoom room, DouyinCredentials credentials, InboundDiagnostics.VisitorSource visitorSource) {
+        @Override public String toString() { return "ExternalAccess[redacted]"; }
     }
 
     /** Only the homepage and canonical room pages; guest bootstrap cannot fetch arbitrary URLs. */

@@ -32,7 +32,12 @@ public final class DouyinCollector extends AbstractCollector {
             long started = System.nanoTime();
             diagnostics().inbound().nextConnection();
             try {
-                DouyinConnection connection = provider.resolve(webRoom, resolvedRoom);
+                DouyinConnection connection;
+                try { connection = provider.resolve(webRoom, resolvedRoom); }
+                finally {
+                    if (provider instanceof WebDouyinConnectionProvider web)
+                        diagnostics().inbound().credentialEvidence(web.credentialEvidence());
+                }
                 if (!context.active.get()) return;
                 // A new broadcast in the same web room requires a new backend session.
                 if (resolvedRoom != null && !resolvedRoom.equals(connection.internalRoomId)) {

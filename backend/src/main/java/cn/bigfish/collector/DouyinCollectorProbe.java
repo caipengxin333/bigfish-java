@@ -31,9 +31,17 @@ public final class DouyinCollectorProbe {
         var resolver = new DouyinRoomResolver();
         if (config.action.equals("resolve")) {
             try {
-                var room = config.credentialMode.equals("guest")
-                        ? new DouyinGuestSession(resolver, java.time.Clock.systemUTC()).resolve(config.room, null).room()
-                        : resolver.resolve(config.room, credentials(env));
+                DouyinRoom room;
+                if (config.credentialMode.equals("guest")) {
+                    room = new DouyinGuestSession(resolver, java.time.Clock.systemUTC()).resolve(config.room, null).room();
+                } else {
+                    var input = credentials(env);
+                    var access = resolver.resolveExternal(config.room, input, null);
+                    room = access.room();
+                    System.out.println("credentials=external credentialValidation=LOCAL_VALID loginFields="
+                            + (input.hasLoginFields() ? "PRESENT" : "ABSENT") + " visitorSource=" + access.visitorSource()
+                            + " platformLogin=UNVERIFIED");
+                }
                 System.out.println("mode=DOUYIN action=resolve state=" + (room.live() ? "LIVE" : "ENDED")
                         + " credentials=" + config.credentialMode + " roomResolved=true comments=0 gifts=0 receiveAttempted=false");
                 return 0;
@@ -46,13 +54,16 @@ public final class DouyinCollectorProbe {
         var provider = provider(config, env, signer, resolver);
         var attempts = new AtomicInteger(); var comments = new LongAdder(); var gifts = new LongAdder(); var giftUnits = new LongAdder();
         var follows = new LongAdder(); var entrances = new LongAdder(); var likes = new LongAdder();
+        var inbound = new java.util.concurrent.atomic.AtomicReference<InboundDiagnostics>();
         var collector = new DouyinCollector(new DouyinConnectionProvider() {
             @Override public DouyinConnection resolve(String room) throws Exception { return resolve(room, null); }
             @Override public DouyinConnection resolve(String room, String expectedRoom) throws Exception {
                 if (attempts.incrementAndGet() > config.maxAttempts) throw new DouyinFailure(ATTEMPT_LIMIT);
-                return provider.resolve(room, expectedRoom);
+                try { return provider.resolve(room, expectedRoom); }
+                finally { inbound.get().credentialEvidence(provider.credentialEvidence()); }
             }
         });
+        inbound.set(collector.diagnostics().inbound());
         collector.diagnostics().inbound().credentials(config.credentialMode.equals("guest")
                 ? InboundDiagnostics.Credentials.GUEST : InboundDiagnostics.Credentials.EXTERNAL);
         Thread shutdown = new Thread(collector::stop, "bigfish-douyin-probe-shutdown");
@@ -101,11 +112,11 @@ public final class DouyinCollectorProbe {
                     + " malformed=" + d.count(CollectorDiagnostics.Counter.MALFORMED)
                     + " reconnect=" + d.count(CollectorDiagnostics.Counter.RECONNECT) + " code=" + d.lastError());
             System.out.println(collector.resources() + " httpInFlight=" + provider.inFlightRequests() + " signingWorkers=" + provider.signingWorkers());
-            var inbound = d.inbound().snapshot();
-            inbound.methods().forEach((method, count) -> System.out.println("method=" + method + " count=" + count));
-            inbound.counts().forEach((key, count) -> System.out.println("inbound=" + key + " count=" + count));
-            inbound.samples().forEach(sample -> System.out.println("inboundSample=" + sample));
-            System.out.println("inboundOmittedKeys=" + inbound.omittedKeys());
+            var snapshot = d.inbound().snapshot();
+            snapshot.methods().forEach((method, count) -> System.out.println("method=" + method + " count=" + count));
+            snapshot.counts().forEach((key, count) -> System.out.println("inbound=" + key + " count=" + count));
+            snapshot.samples().forEach(sample -> System.out.println("inboundSample=" + sample));
+            System.out.println("inboundOmittedKeys=" + snapshot.omittedKeys());
             if (interrupted) Thread.currentThread().interrupt();
         }
         // A successful handshake without an actual business message is not a successful receive verification.
@@ -151,7 +162,7 @@ public final class DouyinCollectorProbe {
         catch (java.time.format.DateTimeParseException exception) { throw new DouyinFailure(CREDENTIALS_INVALID); }
         var credentials = new DouyinCredentials(env.apply("BIGFISH_DOUYIN_COOKIE"), env.apply("BIGFISH_DOUYIN_USER_AGENT"),
                 env.apply("BIGFISH_DOUYIN_USER_UNIQUE_ID"), expiresAt);
-        credentials.validate(Instant.now());
+        credentials.validateForResolution(Instant.now());
         return credentials;
     }
     record Config(String room, String action, int seconds, String credentialMode, int maxAttempts) {
