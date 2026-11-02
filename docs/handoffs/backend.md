@@ -1,3 +1,128 @@
+# 显式采集凭据与礼物业务追踪交接（2026-11-02）
+
+本节为本轮最新交付，下方历史内容保留。工作树 `bigfish-worktrees/backend`，分支 `feature/backend-core`。
+
+## 基线与提交
+
+- 开工检查目录/分支正确、工作区干净；从 `813e8d56bdfc467f7ae5148030a60f31e8485473` 快进合入最新本地 main **`803532fa1f6a64bad038f5cd18c8ab322c53b03e`**。
+- 实现与回归提交：**`a5bb696dbad51771aafa2403b9774039f429d781`**，`feat(backend): add explicit collector credentials and bounded gift tracing`。
+- 实现提交后 main 仍为 `803532f`，祖先检查通过，未遗漏主线更新。本文单独提交；文档提交 SHA 见最终回复或 `git log -1 --format=%H -- docs/handoffs/backend.md`。
+- 仅本地提交，未更新 main、推送远端或联系其他窗口；没有启动/停止主窗口直播进程。
+
+## 实际修改范围与兼容性
+
+| 文件 | 修改 |
+| --- | --- |
+| `configuration/SessionCollectors.java` | 显式 guest/external 工厂选择、本机凭据预校验、固定诊断；沿用现有 provider、credentials、signer 和房间绑定 |
+| `configuration/CoreConfiguration.java` | 从 Spring Environment 接线凭据模式与可选礼物文件日志，启动不请求平台 |
+| `management/SessionService.java` | 启动失败保留具体凭据原因；已关闭入口的礼物回调只输出旧会话拒绝证据 |
+| `management/RuntimeEngine.java` | 礼物校验、去重、合并、排队、模板节点日志；接入已有合成/播放诊断，不改变业务调度 |
+| `management/diagnostics/RuntimeDiagnostics.java` | 增加内部观察者构造方法，原构造方法兼容；已有任务终态去重与会话隔离保持不变 |
+| `management/diagnostics/GiftTrace.java`、`GiftTraceLog.java` | 固定元数据日志及异步、有界本机保存器 |
+| `core/CoreRig.java`、`CollectorCredentialsTest.java`、`CollectorConfigurationIntegrationTest.java`、`GiftBusinessTraceTest.java`、`GiftTraceLogTest.java` | 测试接线和新增 23 项本地回归 |
+| `docs/handoffs/backend.md` | 本轮顶部交接 |
+
+未修改 collector、frontend、conversation、speech、播放协议/调度实现、公共 DTO、OpenAPI、数据库、脚本或 POM。点赞感谢策略、DeepSeek 提示词、TTS 实现不变。现有 REST/WS 字段不变，`mode/conversationMode/speechMode` 的独立含义不变；HTTP 错误通过既有 `code` 字段表达。
+
+## 连接模式与凭据配置
+
+全部沿用独立 probe 的名称，**只由用户在本机服务运行环境提供**；没有添加配置数据库字段、凭据管理接口或浏览器 Cookie 读取。
+
+| 环境变量 | 规则 |
+| --- | --- |
+| `BIGFISH_DOUYIN_CREDENTIAL_MODE` | 未设置时 `guest`；显式值仅允许小写 `guest` / `external`，空值或其他值为 `CREDENTIAL_MODE_INVALID`；启动时选择，修改后需在合适时机重启该实例 |
+| `BIGFISH_DOUYIN_COOKIE` | external 必须提供的用户授权网页会话 Cookie；guest 不读取 |
+| `BIGFISH_DOUYIN_USER_AGENT` | 与该会话匹配的 UA；guest 不读取 |
+| `BIGFISH_DOUYIN_USER_UNIQUE_ID` | 与该会话匹配的数字访客 ID；不伪造或使用固定身份 |
+| `BIGFISH_DOUYIN_CREDENTIALS_EXPIRES_AT` | 用户允许本机使用到的 ISO-8601 UTC 时间，如格式 `YYYY-MM-DDTHH:mm:ssZ`；必须晚于当前时间 |
+| `BIGFISH_GIFT_TRACE_PERSIST` | 仅显式 `true` 开启下述礼物文件保存，默认关闭；控制台脱敏日志默认开启 |
+
+guest 继续使用 `WebDouyinConnectionProvider.guest(bindingSigner)`；external 使用现有 `WebDouyinConnectionProvider(CredentialSource, bindingSigner)` 和 `DouyinCredentials`，没有重写采集器、签名或解析。credentials 的权威校验是 collector 包内私有方法；本轮在工厂做同等最小预校验，实际 provider 在解析/签名前仍执行原校验。重连重新读取凭据来源，过期则失败，不降级游客。
+
+启动日志固定为 `douyin_connection mode=GUEST|EXTERNAL|INVALID validation=... platform=UNVERIFIED`。guest 的配置结果是 `GUEST_AUTO`；external 合法格式且未超过本地截止时间才为 `LOCAL_VALID`。**LOCAL_VALID 不是平台登录验证成功，不代表 Cookie 在平台仍有效，更不代表已连接或已收到礼物。** 平台拒绝/验证要求仍由既有采集器产生固定错误码。本轮没有增加有效 WSS 的凭据到期定时断开机制；本地截止时间在启动和下一次解析/重连时检查。
+
+external 缺失、格式错误、本地截止时间已过，分别为 `CREDENTIALS_MISSING`、`CREDENTIALS_INVALID`、`CREDENTIALS_EXPIRED`。环境读取/解析异常也转换为固定原因，不输出属性值或异常 cause。错误配置不会阻止 Spring 启动或 MOCK 使用；显式启动 DOUYIN 时才返回 HTTP 503 与 `DOUYIN_<原因>`，主会话 `FAILED` / `runtime.lastError=COLLECTOR_FAILED` / `collector.lastError=<原因>`。入口已关闭且没有创建新采集线程。原 `COLLECTOR_STOPPING` 门禁保持。
+
+本工作树开发启动（guest，不需要凭据）：
+
+```bash
+BIGFISH_DOUYIN_CREDENTIAL_MODE=guest BIGFISH_GIFT_TRACE_PERSIST=true ./scripts/dev-backend.sh
+```
+
+external 启动：用户先在自己的运行环境设置上述四项凭据，不在命令示例、交接、截图或 Git 文件中放真实值，再执行：
+
+```bash
+BIGFISH_DOUYIN_CREDENTIAL_MODE=external BIGFISH_GIFT_TRACE_PERSIST=true ./scripts/dev-backend.sh
+```
+
+脚本沿用本工作树 `runtime/worktree.env`，端口 18081，独立数据目录；本轮没有写入该文件。不要为了本次集成停止主窗口当前直播，由用户/主窗口安排启用时机。启动、查询、保存配置均不自动连接抖音；仍需显式 POST 会话 `mode=DOUYIN`，回复和语音可独立选择 `MOCK` / `LOCAL_TEST_TONE`。`BIGFISH_DOUYIN_LIVE_PROBE` 等 probe 专用开关不是主会话开关。
+
+## 礼物日志如何阅读
+
+日志行前缀 `gift_trace`，内容为 JSON。字段仅有 `sequence/at/sessionId/taskId/eventType/phase/reason/relatedTaskId/configVersion/quantity/stageMs/taskMs`。ID 只保留 UUID 格式；阶段/原因仅允许固定枚举，数量有界。**不保存 Cookie、UA、访客 ID、用户 ID/昵称、礼物名称、评论正文、感谢文本、上游 eventId/comboId、签名 URL、HTTP 数据或原始异常。** 本轮只关联后端生成的 sessionId/taskId。
+
+| 节点 | 日志依据 |
+| --- | --- |
+| 进入有效会话的 EventIngress | `RECEIVED`：还未通过业务校验，不表示原始 WSS 帧接收或礼物最终播出 |
+| 校验、去重 | `VALIDATED`、`DEDUP_PASSED`；无效事件 `DROPPED/INVALID_EVENT`，串房另有 `INGRESS_REJECTED/ROOM_MISMATCH`；重复 `SKIPPED/DUPLICATE` |
+| 连击合并 | `MERGE_CHECKED` 携带 `NO_MERGE_CANDIDATE/MISSING_USER_ID/MERGE_QUANTITY_LIMIT`；合并成功 `MERGED_INTO/GIFT_MERGED`，`relatedTaskId` 指向保留的主任务，`quantity` 是合并后数量；被并入的收件任务终态为 `SKIPPED/GIFT_MERGED` |
+| 队列、模板 | `TEMPLATE_QUEUED → SPEECH_WAIT → TEMPLATE_RENDERED → SYNTHESIS_QUEUED`；模板数量来自原有增量合并，礼物不等待模型；拒绝/淘汰使用 `QUEUE_FULL/CAPACITY_REDUCED/TASK_EXPIRED` 等原固定原因 |
+| 合成 | `SPEECH_STARTED → SPEECH_COMPLETED`；失败 `FAILED` 携带原语音映射码，如 `RATE_LIMITED/OVERALL_TIMEOUT/INVALID_AUDIO` |
+| 播放 | `PLAYBACK_WAIT → PLAYBACK_SENT → STARTED → COMPLETED`；前两者不证明浏览器已发声，STARTED/COMPLETED 来自有效租约回执；失败/取消分别为 `PLAYER_FAILED/PLAYER_CANCELLED` 等固定原因 |
+| 断线、租约、停止 | 原有 `PLAYER_DISCONNECTED/LEASE_EXPIRED/PLAYER_CHANGED/SESSION_STOPPED` 等原因；已经关闭的采集入口只记录 `INGRESS_REJECTED/SESSION_NOT_RUNNING`，旧 sessionId 不写入新会话运行诊断 |
+
+同一 task 的终态使用已有 RuntimeDiagnostics guard，只计一次；失败后的取消/释放/迟到回调不能再添加第二个终态。`MERGED_INTO` 是关联证据，随后 `SKIPPED` 是收件终态，统计合并次数应按阶段/taskId 去重，不能直接按 reason 出现行数计数。旧会话日志保留在文件中；前端当前会话诊断仍在开始时重置。
+
+`stageMs/taskMs` 在已有生命周期记录中表示上一阶段耗时/任务累计耗时；新业务节点仅为时间点，两个耗时字段为 0。`quantity` 只在校验、入队、合并、模板节点填写，其他节点的 0 不表示用户送了零个礼物。`sequence` 是当前日志实例的序号，拒绝入队会有缺号；跨进程按 `at + sessionId + taskId` 阅读，不能假定 sequence 永不重置。
+
+## 本机保存路径与上限
+
+启用 `BIGFISH_GIFT_TRACE_PERSIST=true` 后，路径固定在：
+
+```text
+<BIGFISH_DATA_DIR>/diagnostics/gifts/
+  gift-trace.lock
+  gift-trace-0.jsonl
+  gift-trace-1.jsonl
+  gift-trace-2.jsonl
+  gift-trace-3.jsonl
+```
+
+本工作树未额外覆盖 DATA_DIR 时，绝对路径为：
+`/Volumes/ZHITAI_MAC/创业项目测试/大肥鱼直播/bigfish-worktrees/backend/runtime/diagnostics/gifts/`。
+
+- 最多 **4 × 1 MiB = 4 MiB** 日志内容，另加空锁文件；单行上限 2048 bytes。文件写满后仅截断下一个固定槽文件，不删除文件或目录，不产生按日期无限增长的文件。
+- 单个 daemon 写线程，等待队列最多 **1024 条**。业务线程只尝试入队，不等待磁盘或控制台；满队列丢弃本条诊断、累计 dropped 并输出 `gift_trace_loss` 固定告警，不丢弃业务任务或让业务异常。
+- `GiftTraceLog.status()` 是内部方法，可读 delivered/persisted/dropped/ioFailures/queued/workerAlive 和文件状态；未新增 REST。`FILE_INIT_FAILED/FILE_WRITE_FAILED` 会明确告警，文件不可用时继续控制台诊断，不回退其他目录。内存满、已关闭或控制台异常统一计入 dropped；文件错误由 ioFailures/文件状态单独表达。
+- 固定诊断目录/文件拒绝符号链接，POSIX 目录 0700、文件 0600；文件锁防止两个实例同时写同一组槽。既有异常文件或过大文件会使保存不可用，不擅自删除或清理。
+- 正常关闭最多等待写线程 2 秒排空，超时记录 `SHUTDOWN_BUDGET` 并放弃尚未保存的诊断；进程崩溃/磁盘故障/拥塞不保证完整持久化。这是受限排障日志，不是无损业务账本。极端永久阻塞的 I/O 可能留下正在退出的 daemon，业务线程不等待它；没有无限重试。
+- 文件不随会话停止、诊断 5 分钟保留期或 REST 最近 20 条窗口清空；容量轮转仍会覆盖旧记录。保存前后都不会把运行目录作为静态资源发布。不做自动上传、导出接口或远程保存。
+- 本机查看可用 `rg '"phase":"FAILED"|"reason":"QUEUE_FULL"|"phase":"COMPLETED"' runtime/diagnostics/gifts/gift-trace-*.jsonl`，再用 sessionId/taskId 筛选；文件名不是严格时间顺序。
+
+## 测试结果
+
+| 命令/验证 | 结果 |
+| --- | --- |
+| `./scripts/maven.sh -B -ntp -pl backend '-Dtest=CollectorCredentialsTest,DouyinSessionTest' test` | 初始凭据接线 15/15 通过，保留 DOUYIN 生命周期 |
+| `./scripts/maven.sh -B -ntp -pl backend '-Dtest=CollectorCredentialsTest,CollectorConfigurationIntegrationTest,GiftBusinessTraceTest,GiftTraceLogTest' test` | 最终新增专项 **23/23** 通过，2026-11-02 15:15:44 +08:00，日志 `/tmp/bigfish-gift-targeted-final.log` |
+| `./scripts/maven.sh -B -ntp test` | 最终 **277 项：275 通过、2 项真实 NLS/Token 默认跳过，0 failure/error**，2026-11-02 15:16:51 +08:00，22.335 秒；日志 `/tmp/bigfish-gift-full-final.log` |
+| 凭据与 Spring | 默认 guest 不读取 external 凭据；external 构造与过期复查；缺失/格式错误/未知模式/属性读取异常的固定码；LOCAL_VALID + UNVERIFIED 脱敏日志；Spring external 缺凭据正常启动、查询和 MOCK 可用、DOUYIN 明确 503 |
+| 礼物 | 模板不调用模型、重复/合并及主任务关联、满队列 50 次拒绝容量不涨、TTL、LIKE 不产生语音/礼物日志、合成失败后成功、播放 FAILED/CANCELLED 区分、重复 ACK、停止后的迟到语音、断线和损坏日志观察者 |
+| 文件 | 80+ 行跨重启保留、历史过期不清文件、固定槽轮转字节上限/完整 JSON、慢写入队列容量与 dropped、关闭释放线程、文件锁释放、目录/文件符号链接拒绝、运行中写入失败一次停用文件且控制台继续 |
+| 既有回归 | 配置持久化/CAS、DOUYIN/MOCK 隔离、关播/失败根因、COLLECTOR_STOPPING、实际回环 WebSocket/音频/租约、PCM→WAV、STATIC/RAM 和 Live2D 资源测试均保留并通过 |
+| 差异与基线 | `git diff --check`、staged check、`git merge-base --is-ancestor main HEAD` 通过；禁止修改目录与基线差异为空 |
+
+测试仅使用人工凭据、Mockito provider、本地替身、临时 SQLite/日志和回环 WebSocket；没有读取真实 Cookie、连接真实房间、调用云模型/语音/Token 或停止主窗口服务。本轮未额外打包或启动独立开发服务。新增测试首次编译引用了不存在的语音错误枚举，已改用现有 `PROVIDER_UNAVAILABLE`；没有删除/弱化原断言。测试经授权在沙箱外执行以支持 JVM attach/本机回环端口。
+
+## 待集成与未验证项
+
+1. 用户/主窗口安排启用 external 及可选文件保存的时机；本轮不更换正在直播进程的环境。**真实 external 登录有效性、真实评论/礼物接收、真实礼物到 NLS/浏览器发声均未在本轮验证。** 本地测试不能替代这些验收。
+2. 本轮日志起点是 EventIngress；采集器在发出 LiveEvent 之前的帧解析、过滤、连击增量和去重仍只见其既有聚合诊断。没有把上游消息 ID、用户标识或 Cookie 写进日志，也未建立新的采集↔业务逐条关联。若需要此能力，先由用户与主窗口确认脱敏关联方案及采集边界，本轮未实现或联系其他窗口。
+3. 公共接口无需新增。本轮新增固定错误值 `DOUYIN_CREDENTIAL_MODE_INVALID`、`DOUYIN_CREDENTIALS_MISSING/INVALID/EXPIRED` 沿用现有错误结构；若主窗口需要完善 OpenAPI 错误示例或前端提示，由主窗口统一维护。REST 最近 20 条不扩大，文件状态也不扩展成公共接口。
+4. 若后续 collector 的凭据校验规则改变，主窗口应同时审核工厂预校验一致性；可以再讨论提取共享公开校验入口，本轮不越界改 collector。
+
+---
+
 # Live2D 外部静态资源服务交接（2026-11-02）
 
 本节为本轮最新交付；下方历史内容保留。工作树 `bigfish-worktrees/backend`，分支 `feature/backend-core`。

@@ -9,12 +9,14 @@ import cn.bigfish.scheduler.BoundedPriorityQueue;
 import cn.bigfish.management.diagnostics.RuntimeDiagnostics;
 import cn.bigfish.management.diagnostics.RuntimeDiagnostics.Stage;
 import cn.bigfish.management.diagnostics.RuntimeDiagnostics.Reason;
+import cn.bigfish.management.diagnostics.GiftTrace;
 import jakarta.annotation.PreDestroy;
 import java.time.*;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -46,6 +48,8 @@ public final class RuntimeEngine implements EventIngress {
     private final Clock clock;
     private final Duration modelTimeout, speechTimeout;
     private final RuntimeDiagnostics diagnostics;
+    private final Consumer<GiftTrace> giftTrace;
+    private final AtomicBoolean traceFailureReported=new AtomicBoolean();
     private long appliedVersion, dropped, failures;
     private final RecentEvents recent = new RecentEvents();
     private final BoundedPriorityQueue<Job> comments = BoundedPriorityQueue.withReasons(this::discarded);
@@ -65,9 +69,18 @@ public final class RuntimeEngine implements EventIngress {
     public RuntimeEngine(ConfigStore configs, ConversationPort mock, Supplier<ConversationPort> realFactory,
                          SpeechPort speech, PlaybackCoordinator playback, AudioAssets assets, Clock clock,
                          Duration modelTimeout, Duration speechTimeout) {
+        this(configs,mock,realFactory,speech,playback,assets,clock,modelTimeout,speechTimeout,ignored -> {});
+    }
+    public RuntimeEngine(ConfigStore configs, ConversationPort mock, Supplier<ConversationPort> realFactory,
+                         SpeechPort speech, PlaybackCoordinator playback, AudioAssets assets, Clock clock,
+                         Duration modelTimeout, Duration speechTimeout, Consumer<GiftTrace> giftTrace) {
         this.configs = configs; this.mock = mock; this.realFactory = realFactory; this.speech = speech; this.testSpeech=speech;
         this.playback = playback; this.assets = assets; this.clock = clock;
-        diagnostics = new RuntimeDiagnostics(clock); playback.trackWith(diagnostics);
+        this.giftTrace=Objects.requireNonNull(giftTrace);
+        diagnostics = new RuntimeDiagnostics(clock,trace -> {
+            if(trace.eventType()==LiveEvent.Type.GIFT) recordGift(GiftTrace.lifecycle(trace));
+        });
+        playback.trackWith(diagnostics);
         this.modelTimeout = modelTimeout; this.speechTimeout = speechTimeout;
         configs.current();
     }
@@ -127,7 +140,11 @@ public final class RuntimeEngine implements EventIngress {
         state = State.STOPPED;
     }
     @Override public synchronized Result accept(LiveEvent input) {
-        if (state != State.RUNNING || input == null || !sessionId.equals(input.sessionId())) return Result.REJECTED_SESSION;
+        if (state != State.RUNNING || input == null || !sessionId.equals(input.sessionId())) {
+            if(input!=null && input.type()==LiveEvent.Type.GIFT) rejectedGift(input.sessionId(),
+                !sessionId.equals(input.sessionId()) ? GiftTrace.Reason.SESSION_MISMATCH : GiftTrace.Reason.SESSION_NOT_RUNNING);
+            return Result.REJECTED_SESSION;
+        }
         Instant now = clock.instant();
         String taskId = UUID.randomUUID().toString();
         ConfigSnapshot config = configs.snapshot();
@@ -135,8 +152,13 @@ public final class RuntimeEngine implements EventIngress {
         LiveEvent event;
         try { event = EventValidator.normalize(input, now); }
         catch (IllegalArgumentException e) { diagnostics.mark(sessionId,taskId,Stage.DROPPED,Reason.INVALID_EVENT); return Result.INVALID; }
-        if (!roomId.equals(event.roomId())) { diagnostics.mark(sessionId,taskId,Stage.DROPPED,Reason.INVALID_EVENT); return Result.INVALID; }
+        if (!roomId.equals(event.roomId())) {
+            gift(event,taskId,config.version(),GiftTrace.Phase.INGRESS_REJECTED,GiftTrace.Reason.ROOM_MISMATCH,"",0);
+            diagnostics.mark(sessionId,taskId,Stage.DROPPED,Reason.INVALID_EVENT); return Result.INVALID;
+        }
+        gift(event,taskId,config.version(),GiftTrace.Phase.VALIDATED,GiftTrace.Reason.NONE,"",giftQuantity(event));
         if (recent.contains(event.eventId(), now)) { diagnostics.mark(sessionId,taskId,Stage.SKIPPED,Reason.DUPLICATE); return Result.DUPLICATE; }
+        gift(event,taskId,config.version(),GiftTrace.Phase.DEDUP_PASSED,GiftTrace.Reason.NONE,"",0);
         var settings = config.settings();
         var player = playback.status();
         if (event.type() == LiveEvent.Type.LIKE) {
@@ -160,7 +182,10 @@ public final class RuntimeEngine implements EventIngress {
             trace(job,Stage.SKIPPED,Reason.GIFT_MERGED); accepted = true;
         } else {
             accepted = (event.type() == LiveEvent.Type.COMMENT ? comments : templates).offer(job,settings.synthesisQueueCapacity(),now);
-            if (accepted) trace(job,event.type()==LiveEvent.Type.COMMENT ? Stage.MODEL_WAIT : Stage.SPEECH_WAIT,Reason.NONE);
+            if (accepted) {
+                gift(job,GiftTrace.Phase.TEMPLATE_QUEUED,GiftTrace.Reason.NONE,"",giftQuantity(event));
+                trace(job,event.type()==LiveEvent.Type.COMMENT ? Stage.MODEL_WAIT : Stage.SPEECH_WAIT,Reason.NONE);
+            }
         }
         if (!accepted) return Result.REJECTED_FULL;
         if (welcome) lastWelcome = now;
@@ -170,19 +195,20 @@ public final class RuntimeEngine implements EventIngress {
     private boolean mergeGift(Job job, Instant now) {
         // quantity is already incremental by contract; never subtract it a second time.
         var e = job.event();
-        if (e.userId().isBlank()) return false;
+        if (e.userId().isBlank()) { gift(job,GiftTrace.Phase.MERGE_CHECKED,GiftTrace.Reason.MISSING_USER_ID,"",0); return false; }
         Job previous = templates.find(j -> j.event().type() == LiveEvent.Type.GIFT && j.readyAt().isAfter(now)
             && j.config().version() == job.config().version() && j.epoch() == job.epoch()
             && j.event().userId().equals(e.userId()) && j.event().payload().get("giftId").equals(e.payload().get("giftId"))
             && j.event().payload().get("comboId").equals(e.payload().get("comboId")));
-        if (previous == null) return false;
+        if (previous == null) { gift(job,GiftTrace.Phase.MERGE_CHECKED,GiftTrace.Reason.NO_MERGE_CANDIDATE,"",0); return false; }
         long quantity = ((Number)previous.event().payload().get("quantity")).longValue() + ((Number)e.payload().get("quantity")).longValue();
-        if (quantity > 1_000_000) return false;
+        if (quantity > 1_000_000) { gift(job,GiftTrace.Phase.MERGE_CHECKED,GiftTrace.Reason.MERGE_QUANTITY_LIMIT,previous.id(),0); return false; }
         var p = new HashMap<>(previous.event().payload()); p.put("quantity",quantity);
         var merged = new LiveEvent(1,previous.event().eventId(),sessionId,roomId,LiveEvent.Type.GIFT,e.userId(),
             previous.event().username(),previous.event().receivedAt(),Collections.unmodifiableMap(p));
         templates.replace(previous,new Job(previous.id(),merged,previous.config(),previous.expiresAt(),previous.readyAt(),
             previous.priority(),previous.epoch(),null,previous.failed()));
+        gift(job,GiftTrace.Phase.MERGED_INTO,GiftTrace.Reason.GIFT_MERGED,previous.id(),quantity);
         return true;
     }
     @Scheduled(fixedDelay = 25)
@@ -213,7 +239,12 @@ public final class RuntimeEngine implements EventIngress {
         if (!player.ready()) return;
         Job template;
         while ((template = templates.poll(now)) != null) {
-            if (valid(template)) synthesis.offer(template.withText(GiftTemplates.render(template.event())),capacity,now);
+            if (valid(template)) {
+                Job rendered=template.withText(GiftTemplates.render(template.event()));
+                gift(template,GiftTrace.Phase.TEMPLATE_RENDERED,GiftTrace.Reason.NONE,"",giftQuantity(template.event()));
+                if(synthesis.offer(rendered,capacity,now))
+                    gift(rendered,GiftTrace.Phase.SYNTHESIS_QUEUED,GiftTrace.Reason.NONE,"",0);
+            }
             else discardInvalid(template);
         }
         // A cancelled noncompliant port may still occupy its one worker. Keep pending work bounded by queue/TTL.
@@ -393,6 +424,30 @@ public final class RuntimeEngine implements EventIngress {
         return new WorkerStatus(worker.getPoolSize(),worker.getActiveCount(),worker.getQueue().size(),worker.getCompletedTaskCount());
     }
     private void trace(Job job, Stage stage, Reason reason) { diagnostics.mark(job.event().sessionId(),job.id(),stage,reason); }
+    /** Log-only closed callback evidence; it cannot alter the current session or revive a task. */
+    public void collectorIngressClosed(String closedSession,LiveEvent.Type type) {
+        if(type==LiveEvent.Type.GIFT) rejectedGift(closedSession,GiftTrace.Reason.SESSION_NOT_RUNNING);
+    }
+    private void rejectedGift(String rejectedSession,GiftTrace.Reason reason) {
+        recordGift(GiftTrace.business(clock.instant(),rejectedSession,UUID.randomUUID().toString(),
+            GiftTrace.Phase.INGRESS_REJECTED,reason,"",0,0));
+    }
+    private void gift(Job job,GiftTrace.Phase phase,GiftTrace.Reason reason,String target,long quantity) {
+        gift(job.event(),job.id(),job.config().version(),phase,reason,target,quantity);
+    }
+    private void gift(LiveEvent event,String task,long version,GiftTrace.Phase phase,GiftTrace.Reason reason,String target,long quantity) {
+        if(event.type()==LiveEvent.Type.GIFT)
+            recordGift(GiftTrace.business(clock.instant(),event.sessionId(),task,phase,reason,target,version,quantity));
+    }
+    private static long giftQuantity(LiveEvent event) {
+        return event.type()==LiveEvent.Type.GIFT ? ((Number)event.payload().get("quantity")).longValue() : 0;
+    }
+    private void recordGift(GiftTrace trace) {
+        try { giftTrace.accept(trace); }
+        catch(RuntimeException ignored) {
+            if(traceFailureReported.compareAndSet(false,true)) log.warn("gift_trace_loss reason=OBSERVER_FAILED");
+        }
+    }
     private Reason invalidReason(Job job) {
         if (!job.expiresAt().isAfter(clock.instant())) return Reason.TASK_EXPIRED;
         return state!=State.RUNNING || !sessionId.equals(job.event().sessionId()) ? Reason.SESSION_STOPPED : Reason.PLAYER_CHANGED;

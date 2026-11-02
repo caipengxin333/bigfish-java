@@ -45,6 +45,10 @@ final class CoreRig implements AutoCloseable {
         this(directory,conversation,null);
     }
     CoreRig(Path directory, ConversationPort conversation, SpeechPort customSpeech) throws Exception {
+        this(directory,conversation,customSpeech,ignored -> {});
+    }
+    CoreRig(Path directory, ConversationPort conversation, SpeechPort customSpeech,
+            java.util.function.Consumer<cn.bigfish.management.diagnostics.GiftTrace> trace) throws Exception {
         var jdbc = new JdbcTemplate(new DriverManagerDataSource("jdbc:sqlite:" + directory.resolve("test.db")));
         jdbc.execute("CREATE TABLE app_config(id INTEGER PRIMARY KEY,version INTEGER NOT NULL,content_json TEXT NOT NULL,updated_at TEXT NOT NULL)");
         configs = new ConfigStore(jdbc,JsonMapper.builder().findAndAddModules().build());
@@ -52,7 +56,7 @@ final class CoreRig implements AutoCloseable {
         speech = new LocalTestSpeech(directory.resolve("audio"));
         playback = new PlaybackCoordinator(clock,assets);
         engine = new RuntimeEngine(configs,conversation,() -> { throw new IllegalStateException(); },
-            customSpeech == null ? speech : customSpeech,playback,assets,clock,Duration.ofSeconds(20),Duration.ofSeconds(5));
+            customSpeech == null ? speech : customSpeech,playback,assets,clock,Duration.ofSeconds(20),Duration.ofSeconds(5),trace);
         session = engine.startMock();
         connect(peer);
     }
