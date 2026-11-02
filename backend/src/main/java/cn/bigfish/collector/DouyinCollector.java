@@ -18,6 +18,7 @@ public final class DouyinCollector extends AbstractCollector {
     }
     DouyinCollector(DouyinConnectionProvider provider, CollectorOptions options, Clock clock, Supplier<CollectorSocket> sockets) {
         super(options, clock); this.provider = Objects.requireNonNull(provider);
+        if (provider instanceof WebDouyinConnectionProvider web) diagnostics().inbound().credentials(web.credentialMode());
         this.sockets = sockets == null ? () -> new JdkCollectorSocket(options, diagnostics(), clock) : sockets;
     }
     @Override public String mode() { return "DOUYIN"; }
@@ -29,6 +30,7 @@ public final class DouyinCollector extends AbstractCollector {
         String resolvedRoom = null;
         while (context.active.get()) {
             long started = System.nanoTime();
+            diagnostics().inbound().nextConnection();
             try {
                 DouyinConnection connection = provider.resolve(webRoom, resolvedRoom);
                 if (!context.active.get()) return;
@@ -51,6 +53,7 @@ public final class DouyinCollector extends AbstractCollector {
                     if (frame != null) {
                         consume(context, protocol, socket, frame, resolvedRoom);
                     } else if (!socket.isOpen()) throw new IOException("Transport closed");
+                    diagnostics().inbound().flushLogs(false);
                     // Drain already received control frames even when onClose has arrived immediately after them.
                     if (!context.active.get()) return;
                     long now = System.nanoTime();
@@ -93,9 +96,24 @@ public final class DouyinCollector extends AbstractCollector {
         catch (IOException | IllegalArgumentException exception) { diagnostics().error(MALFORMED, 0); return; }
         // When the peer already closed, an ACK cannot be sent; still consume its final control packet.
         if (batch.acknowledgement() != null && socket.isOpen()) {
-            socket.acknowledge(batch.acknowledgement()); diagnostics().increment(ACK);
+            try (var frameScope = diagnostics().inbound().use(batch.frameTrace())) {
+                try {
+                    socket.acknowledge(batch.acknowledgement()); diagnostics().increment(ACK);
+                    diagnostics().inbound().record(InboundDiagnostics.Stage.ACK_SEND, InboundDiagnostics.Reason.ACK_SENT, null);
+                } catch (Exception exception) {
+                    diagnostics().inbound().record(InboundDiagnostics.Stage.ACK_SEND, InboundDiagnostics.Reason.ACK_SEND_FAILED, null);
+                    for (int index = 0; index < batch.messages().size(); index++) {
+                        try (var scope = diagnostics().inbound().use(batch.traces().get(index))) {
+                            diagnostics().inbound().record(InboundDiagnostics.Stage.DELIVERY_QUEUE, InboundDiagnostics.Reason.ACK_BLOCKED,
+                                    InboundDiagnostics.eventKind(batch.messages().get(index).kind()), null);
+                        }
+                    }
+                    throw exception;
+                }
+            }
         }
-        for (IncomingMessage message : batch.messages()) context.accept(message, frame.receivedAt());
+        for (int index = 0; index < batch.messages().size(); index++)
+            context.accept(batch.messages().get(index), frame.receivedAt(), batch.traces().get(index));
     }
 
     long reconnectDelayMillis(int failure, double jitter) {

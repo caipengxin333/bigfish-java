@@ -53,6 +53,8 @@ public final class DouyinCollectorProbe {
                 return provider.resolve(room, expectedRoom);
             }
         });
+        collector.diagnostics().inbound().credentials(config.credentialMode.equals("guest")
+                ? InboundDiagnostics.Credentials.GUEST : InboundDiagnostics.Credentials.EXTERNAL);
         Thread shutdown = new Thread(collector::stop, "bigfish-douyin-probe-shutdown");
         Runtime.getRuntime().addShutdownHook(shutdown);
         CollectorPort.State finalState = CollectorPort.State.STOPPED;
@@ -100,6 +102,7 @@ public final class DouyinCollectorProbe {
                     + " reconnect=" + d.count(CollectorDiagnostics.Counter.RECONNECT) + " code=" + d.lastError());
             System.out.println(collector.resources() + " httpInFlight=" + provider.inFlightRequests() + " signingWorkers=" + provider.signingWorkers());
             var inbound = d.inbound().snapshot();
+            inbound.methods().forEach((method, count) -> System.out.println("method=" + method + " count=" + count));
             inbound.counts().forEach((key, count) -> System.out.println("inbound=" + key + " count=" + count));
             inbound.samples().forEach(sample -> System.out.println("inboundSample=" + sample));
             System.out.println("inboundOmittedKeys=" + inbound.omittedKeys());

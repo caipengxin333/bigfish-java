@@ -71,6 +71,8 @@ class MockCollectorTest {
             assertTrue(entered.await(2, TimeUnit.SECONDS));
             writer.write((line("2") + line("3")).getBytes(StandardCharsets.UTF_8)); writer.flush();
             await(() -> collector.diagnostics().count(RECEIVED) == 3);
+            // RECEIVED is incremented at normalization entry, before the source offers to the queue.
+            await(() -> collector.diagnostics().count(QUEUE_FULL) == 1);
             assertEquals(1, collector.diagnostics().count(QUEUE_FULL));
             clock.now.set(clock.instant().plusSeconds(1)); release.countDown();
             await(() -> collector.diagnostics().count(EXPIRED) == 1);
