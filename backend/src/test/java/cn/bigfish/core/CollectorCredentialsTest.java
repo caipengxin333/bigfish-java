@@ -50,7 +50,11 @@ class CollectorCredentialsTest {
         var handle=factory.douyin(ignored -> true);
         assertThat(factory.guestCalls).isEqualTo(1); assertThat(factory.externalCalls).isZero();
         assertThat(handle.port().state()).isEqualTo(CollectorPort.State.STOPPED);
-        verifyNoInteractions(factory.provider);
+        // Collector diagnostics reads only local mode metadata at construction. Resolving,
+        // signing, credential access and every other provider call must remain lazy.
+        assertThat(mockingDetails(factory.provider).getInvocations())
+            .extracting(invocation -> invocation.getMethod().getName())
+            .containsExactly("credentialMode");
         handle.port().stop();
     }
 

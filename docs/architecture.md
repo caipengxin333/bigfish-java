@@ -6,6 +6,8 @@
 
 CollectorPort → EventIngress → 事件校验/去重 → 分类有界队列 → ConversationPort（评论）或礼物模板 → 语音队列 → SpeechPort → 同源音频资源 → /ws/stage → 唯一播放端 → PlaybackAck。
 
+抖音连接由 SessionCollectors 按后端环境显式选择 guest/external，默认游客；external 注入现有 CredentialSource，不增加独立采集进程。两层诊断共用 sessionId：collector_inbound 记录过滤前 method、结构故障、去重、派发及会话累计值；gift_trace 记录后端任务校验、合并、模板、合成和播放结果。采集回调仍为 void Consumer，SINK_RETURNED 不等于业务接受；当前没有跨这两层的逐条关联 ID。礼物业务文件保存为可选的有界异步写入，不改变公共 DTO、点赞策略或消息优先级。
+
 管理端 /admin：业务配置、本浏览器启动选项、打开舞台、停止互动、连接状态与诊断；不创建 AudioContext。
 播放端 /stage：一键开始/停止互动、接入或恢复同一会话、音频、字幕和形象。页面分别控制同一个后端会话，只有有效租约的播放端能发声。
 

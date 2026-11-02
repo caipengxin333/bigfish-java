@@ -1,8 +1,8 @@
-# 抖音采集适配器：原生签名与自动游客会话
+# 抖音采集适配器：凭据配置与消息诊断
 
-采集实现与实测更新：2026-11-02；下方官方路线说明沿用此前核查，本次未重新核查平台开放政策。已内置 `NativeDouyinSigner` 与 `WebDouyinConnectionProvider.guest()`，并接入 `SessionService`。管理页保存数字网页房间号，明确选择 DOUYIN 后在舞台开始互动；自动获取游客 Cookie、访客 ID 与内部房间号。`bootstrap.capabilities.douyinCollector` 和 `providers.douyin.enabled` 表示启动能力已开放，不表示所有真实接收场景已验收。
+采集实现与实测更新：2026-11-02；下方官方路线说明沿用此前核查，本次未重新核查平台开放政策。已内置 `NativeDouyinSigner`，由 `SessionCollectors` 显式选择默认 guest 或 external Provider，并接入 `SessionService`。管理页保存数字网页房间号，明确选择 DOUYIN 后在舞台开始互动。默认自动获取游客 Cookie、访客 ID 与内部房间号；external 使用后端环境提供的网页会话。`bootstrap.capabilities.douyinCollector` 和 `providers.douyin.enabled` 表示启动能力已开放，不表示凭据已验证或所有真实接收场景已验收。
 
-**最新指定房间的独立采集测试已成功接收真实评论。** 2026-11-02，采集窗口在房间 `440132407257` 完成 guest resolve（LIVE，2 次 HTTP），随后一次 60 秒 receive 实际派发评论 **24**、入场 **46**、点赞 **22**，ACK **73**、MALFORMED **0**、重连 **0**；receive 发出 2 次 HTTP、1 次签名和 1 次 WSS 握手，停止后采集资源归零。**真实礼物为 0，礼物接收及主会话真实弹幕 → 模型 → 语音 → 舞台仍未验收。** 详情见 [采集最新交接](../handoffs/collector.md) 与 [主窗口集成记录](../handoffs/phase8-collector-integration.md)。此结果只属于当时指定房间，不保证现在仍在播或所有房间兼容。原页面初始化问题与本次确认的 `pb` 载荷误判均已修复；主会话不回退为 MOCK。历史 92 个错误包未保存，不能逐帧证明全部同因。
+**指定房间的独立采集测试已成功接收真实评论。** 第八轮在房间 `440132407257` 的一次 60 秒游客测试收到评论 24、入场 46、点赞 22，MALFORMED 为 0，见 [第八轮记录](../handoffs/phase8-collector-integration.md)。第十轮采集窗口在房间 `53346665360` 的一次 60 秒游客观察中识别 12 条 envelope、2 条评论，`WebcastGiftMessage=0`、`unattributedFailures=0`，资源退出正常，见 [采集交接](../handoffs/collector.md)。这些结果只属于各自观察窗口，不能追溯用户此前“小心心”的丢失原因，也不能推出“游客一定收不到礼物”。**真实礼物、external 登录有效性及真实礼物到舞台的链路仍待验收。** 本轮主集成见 [第十轮记录](../handoffs/phase10-integration.md)。
 
 保存、状态查询与应用启动不连接抖音，只有显式启动 DOUYIN 会话才连接。公开配置字段目前仅接收数字网页号；内部解析器支持规范链接不意味着配置接口接受任意 URL。`runtime.roomId` 为解析后内部号，解析前为空，不可与已保存网页号比较后认定串房。运行中配置变化不切换既有采集房间。
 
@@ -31,7 +31,7 @@
 - 传输故障使用第一轮的 1～30 秒指数退避与抖动；短暂握手不清空退避。用户 stop 后不再重连；关播控制或房间解析结束使 `state=ENDED`；同网页房间内部 roomId 改变时，先结束旧会话，不为新房间签名或连接。
 - 礼物至少 1、同组累计转增量、重复包去重、不同用户隔离、异常包隔离保留原实现；采集/ACK/心跳不等待业务回调。
 - 入站先重组有界二进制分片，再解码 PushFrame；`payload_encoding=pb` 表示 Protobuf 序列化，压缩方式独立读取 `compress_type` 头，支持 gzip/identity 并保留旧 gzip 标记及魔数兼容。冲突、未知编码、坏 gzip 或解压超限继续拒绝。ACK 优先回显本帧 `im-internal_ext` 头；无该头时仅在 Response 要求 ACK 时回显其 internal_ext，仍要求有效 logId。单条坏消息被隔离，保留同批有效消息和有效 ACK。
-- 内部诊断区分分片、队列、封装、解压、Response、ACK、消息及归一化阶段，仅保留固定标签与数字结构；上限为 128 个计数键、64 个摘要，每个阶段/原因最多 3 份、每份最多 12 个字段形状。只在独立 probe 输出，不新增 REST 字段，不保存正文、用户标识、凭据或原帧。
+- 内部诊断区分分片、队列、封装、解压、Response、ACK、消息及归一化阶段，仅保留固定标签与数字结构；兼容视图上限为 128 个计数键、64 个摘要，每个阶段/原因最多 3 份、每份最多 12 个字段形状。另保留固定枚举空间的累计计数及最多 64 个 method 桶。主会话和 probe 均可输出脱敏控制台日志，不新增 REST 字段，不保存正文、用户标识、凭据或原帧。
 
 ## 支持的输入
 
@@ -42,7 +42,7 @@
 
 ## 默认用法：只填直播链接或房间号
 
-集成调用 `WebDouyinConnectionProvider.guest()`；用户无需提供 Cookie、User-Agent、`user_unique_id` 或凭据截止时间。自动流程为：
+默认集成调用 `WebDouyinConnectionProvider.guest()`；guest 模式无需提供 Cookie、User-Agent、`user_unique_id` 或凭据截止时间。自动流程为：
 
 1. 不带 Cookie 请求固定抖音直播首页，读取响应 `Set-Cookie` 中的 `ttwid`。
 2. 携带该 `ttwid` 和同一程序 UA 请求当前房间页面。房间响应更新 `ttwid` 时采用新值，其余 Cookie 不转发给 WSS。
@@ -55,7 +55,46 @@ Cookie 只接受固定平台首页/房间响应中的 `ttwid`，限制值长度�
 
 首页/房间若要求登录、验证、地区权限或限流，立即给出固定诊断，停止自动重试。首页没下发 `ttwid`、页面没给访客字段时也明确失败；不猜测或复用旧项目硬编码参数。已验证人工页面与上述指定真实房间，不保证所有房间允许游客访问。空 HTTP 200 响应仍归 PAGE_STRUCTURE_CHANGED，不能仅凭空响应认定下播或登录要求。
 
-## 独立 probe 开关与可选外部凭据
+## 主会话凭据配置
+
+在 IDEA 的“运行 → 编辑配置 → BigfishApplication → 环境变量”或服务器 Java 进程环境中设置，修改后重启后端。此配置现在同时用于主会话与独立 probe，网页配置页不存储 Cookie，也不会读取 Safari/Chrome 的登录状态。
+
+| 环境变量 | 内容 |
+| --- | --- |
+| `BIGFISH_DOUYIN_CREDENTIAL_MODE` | 默认 `guest`；显式 `external` 才使用下面四项，值区分大小写 |
+| `BIGFISH_DOUYIN_COOKIE` | 自己有权使用的网页会话 Cookie |
+| `BIGFISH_DOUYIN_USER_AGENT` | 同一网页会话的 User-Agent |
+| `BIGFISH_DOUYIN_USER_UNIQUE_ID` | 同一网页会话对应的数字访客标识；不是主播 ID 或用户抖音号 |
+| `BIGFISH_DOUYIN_CREDENTIALS_EXPIRES_AT` | 本机允许使用到的 ISO-8601 UTC 时间，格式 `YYYY-MM-DDTHH:mm:ssZ`，必须晚于现在 |
+
+guest 不读取 external 四项；external 缺项、格式错误、过期会明确失败，不回退游客。启动日志 `douyin_connection mode=EXTERNAL validation=LOCAL_VALID platform=UNVERIFIED` 仅代表本地检查通过，不能证明 Cookie 在平台有效。截止时间由用户指定，不是服务端签发的有效期；目前在启动/解析/重连时检查，不会仅因时间到达就中断现有长连接。
+
+错误配置不阻止应用启动和 MOCK 测试；启动 DOUYIN 时返回 503 与 `DOUYIN_CREDENTIALS_MISSING`、`DOUYIN_CREDENTIALS_INVALID`、`DOUYIN_CREDENTIALS_EXPIRED` 或 `DOUYIN_CREDENTIAL_MODE_INVALID`，运行详情的 collector.lastError 保留相应根因。凭据不写源码、SQLite、日志、前端响应或交接文件；不要将真实值粘贴到聊天中。
+
+## 礼物没有感谢时如何定位
+
+后端控制台默认有两类日志，无需开启 DEBUG，也不依赖管理页最近 20 条记录：
+
+| 日志前缀 | 能定位的范围 |
+| --- | --- |
+| `collector_inbound` | 过滤前 method、解包/字段故障、归一化、连击去重、队列和 sink 回调；使用 sessionId + generation/frame/message 关联采集事件 |
+| `gift_trace` | 业务收到礼物后的校验、去重、合并、模板、语音和播放；使用 sessionId + taskId，合并有 relatedTaskId |
+
+每 30 秒及停止时的 `WINDOW/COUNTS` 是会话累计值。先核对相同 sessionId、房间和送礼时间，再按下面顺序判断：
+
+1. `giftMethod=0` 且 `unattributedFailures=0`：本观察窗口没有识别到 `WebcastGiftMessage`；继续检查平台推送、房间、凭据与连接初始化。不能据此断言用户没有送礼或接口不支持礼物。
+2. `unattributedFailures>0`：存在还无法归属到消息类型的封装/解码等异常，先看其固定 stage/code 和字段形状，不能仅凭 giftMethod=0 判断上游没推送。
+3. `giftMethod>0`：依次看 `giftParseFailed`、`giftNormalizeFailed`、`giftDuplicates`、`giftQueueDropped`、`giftSinkFailed`。日志给出固定原因、字段号、wire 和长度，坏礼物隔离后仍处理同批正常消息。重复连击被去重是预期行为。
+4. `giftSinkReturned>0`：回调已返回，继续看业务 `gift_trace`。它**不等于业务 ACCEPTED**；采集↔业务当前只有会话级关联，没有逐条映射。业务拒绝、合并、队列满、过期会记录原因。
+5. 业务轨迹沿 `RECEIVED → VALIDATED → TEMPLATE_QUEUED → SPEECH_STARTED → SPEECH_COMPLETED → PLAYBACK_SENT → STARTED → COMPLETED` 追踪；中途还有去重、合并、等待等节点。只收到或只合成成功都不证明浏览器已播放；播放结果需要有效租约回执。
+
+采集日志首次出现输出，同类日志最多每 10 秒合并一次，停止时补齐；正常统计消息为 DEBUG，未知安全类型为 INFO，结构/队列等失败为 WARN。限频影响逐条日志，不丢弃累计计数。不会输出原始二进制、正文、昵称、用户标识、Cookie、签名 URL 或异常原文。点赞仍走 `LIKE_NO_SPEECH`，不会逐条感谢。
+
+可选设置 `BIGFISH_GIFT_TRACE_PERSIST=true`，将**业务**轨迹保存到 `<BIGFISH_DATA_DIR>/diagnostics/gifts/gift-trace-0.jsonl` 至 `gift-trace-3.jsonl`。最多 4 × 1 MiB，写满轮转覆盖旧槽；队列容量 1024，拥塞时丢诊断并记录 `gift_trace_loss`，不会阻塞业务。它不保存 collector_inbound；采集排查还需保留后端控制台日志，例如 IDEA 运行配置的控制台输出保存选项。文件不是无损账本，不能代替完整原始消息记录。
+
+下一次验证先运行新版本，核对连接模式并记下会话与时间；观察同房间自然出现的礼物即可。若记录显示没有收到礼物 method，再对比显式 external 与 guest；不要将登录态假设当成已确认根因，也无需为了补日志反复购买礼物。
+
+## 独立 probe 开关
 
 用户输入项只有当前房间。以下开关供开发者显式运行只读验收，避免默认测试联网；不是要求用户每次开播准备凭据。
 
@@ -69,16 +108,7 @@ Cookie 只接受固定平台首页/房间响应中的 `ttwid`，限制值长度�
 | `BIGFISH_DOUYIN_SIGNER_REVIEWED` | `receive` 须为 `true`，表示已核对 signer 来源；保留上一轮执行保护 |
 | `BIGFISH_DOUYIN_CREDENTIAL_MODE` | 默认 `guest`；只有显式 `external` 才读取下面四项 |
 
-正常使用无须配置以下四项。它们只保留给经用户授权的外部会话诊断：
-
-| 仅 external 使用 | 内容 |
-| --- | --- |
-| `BIGFISH_DOUYIN_COOKIE` | 用户合法网页会话的 Cookie |
-| `BIGFISH_DOUYIN_USER_AGENT` | 同一会话 UA |
-| `BIGFISH_DOUYIN_USER_UNIQUE_ID` | 与该会话匹配的访客 ID |
-| `BIGFISH_DOUYIN_CREDENTIALS_EXPIRES_AT` | 本地允许使用到的 ISO-8601 UTC 截止时间 |
-
-`guest` 完全不读取这些变量，即使机器上已有值也不会自动用它们尝试登录。`external` 缺项或过期直接失败，不自动降级到游客模式。外部凭据仅通过本机后端安全环境/内存注入，不发到聊天，不写命令参数、shell 历史、`runtime/worktree.env`、源码、SQLite 或前端。环境值轮换需重启进程；显式注入的 `CredentialSource` 可逐次提供新值。
+external 四项与上面的主会话凭据配置相同。不要将真实值写入命令参数、shell 历史或 `runtime/worktree.env`。环境值轮换需重启进程；显式注入的 `CredentialSource` 可逐次提供新值。
 
 ## 原生签名来源、实现与在线边界
 

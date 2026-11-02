@@ -102,6 +102,12 @@
 
 详细说明：[DeepSeek](docs/providers/deepseek.md) · [阿里云 NLS](docs/providers/aliyun-nls.md) · [抖音采集限制](docs/providers/douyin.md)。
 
+## 抖音接入与礼物排查
+
+默认使用游客模式：管理页保存数字房间号，选择抖音采集，再到舞台开始互动。程序不会自动使用浏览器中的登录状态。需要使用自己提供的网页会话时，在后端配置 `BIGFISH_DOUYIN_CREDENTIAL_MODE=external` 及 Cookie、UA、访客 ID、使用截止时间四项环境变量，重启后端；具体字段见 [抖音配置](docs/providers/douyin.md#主会话凭据配置)。外部凭据的本地校验通过不代表平台登录有效。
+
+控制台默认输出 `collector_inbound`（接收和解析）与 `gift_trace`（业务处理）脱敏日志。可设置 `BIGFISH_GIFT_TRACE_PERSIST=true`，将礼物业务轨迹额外保存到 `<BIGFISH_DATA_DIR>/diagnostics/gifts/`，最多 4 个各 1 MiB 的轮转文件；这些文件不包含采集端日志。解析失败、去重、队列丢弃及合成/播放失败均有相应原因，判读步骤见 [礼物排查](docs/providers/douyin.md#礼物没有感谢时如何定位)。真实礼物接收仍待验证，新增日志本身不代表漏收已修复；点赞按当前策略不生成感谢语音。
+
 ## 本机 Live2D 形象
 
 默认 SVG 无需模型资源。使用 Live2D 时，将模型和指定版本的 Cubism Core 放入**独立资源目录**，设置后端环境变量 `BIGFISH_AVATAR_ASSETS_DIR` 为该目录的绝对路径，重启后端；随后在舞台展开“舞台形象设置”，选择“Live2D · 本机 BigFish”。
@@ -137,6 +143,8 @@ java -jar bigfish-server-0.1.0-SNAPSHOT.jar
 | 角色、模型、音色等业务配置 | 默认存入 SQLite `runtime/app.db`；网页保存后用于新任务，房间或服务类型切换需新建会话 |
 | 生成音频 | 默认在 `runtime/audio/` |
 | API Key / NLS Token | 由后端运行环境提供，修改后重启 |
+| 抖音凭据 | 默认 guest；external 凭据由后端运行环境提供，不写入 SQLite，修改后重启 |
+| 礼物业务轨迹 | 可选 `BIGFISH_GIFT_TRACE_PERSIST=true`，保存到数据目录下 `diagnostics/gifts/`，容量轮转会覆盖旧记录 |
 | 数据目录与端口覆盖 | `BIGFISH_DATA_DIR`、`BIGFISH_PORT`；开发前端可用 `BIGFISH_UI_PORT`、`BIGFISH_API_TARGET` |
 | Live2D 资源 | `BIGFISH_AVATAR_ASSETS_DIR` 指定独立绝对目录；更换根目录后重启；形象偏好保存在浏览器 |
 
