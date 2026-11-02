@@ -1,4 +1,118 @@
-# 礼物接收开源实现与登录态证据复核（2026-11-02，分析轮）
+# external Cookie 与自动访客上下文交接（2026-11-02，本轮）
+
+**采集层 external 接入已完善并通过离线验证；真实 external 登录上下文尚未验证，真实礼物待验收，不能宣称礼物漏收已经修复。** 页面配置 API、后端配置保存及 SessionCollectors 接线不在本窗口修改范围。
+
+## 提交、基线和范围
+
+- 实现与测试提交：**80d4b213e6afa0ee599b4fb8866c359246665030**，feat(collector): resolve external visitor from consistent cookie context。本文另作交接提交，最终 SHA 见当前任务回复。
+- 开工检查 pwd、feature/douyin-collector、git status 正确且干净；main 为 **be628e125caa855ba708f6222aa5cb42171658ee**。执行 git merge --no-edit main，Already up to date。实现提交后工作区干净，再次执行相同合并及祖先检查通过，main 未变化。
+- 只改 collector 包、collector 测试和本文。没有修改管理 API、SessionCollectors、Vue、公共 DTO/POM、依赖、原生 signer、ACK/心跳、礼物字段、IM 初始化；未改主工作树、未停止主直播、未推送或联系其他窗口。没有新增第三方代码或资源。
+
+## 本轮实现
+
+1. 保留 guest 自动游客流程；guest 不读取 external Cookie/UA/截止时间/访客 ID。external 不进行首页游客初始化、不裁剪为 ttwid、不静默切回 guest，也不以响应 Set-Cookie 替换用户传入的身份。
+2. external 在每次 resolve 开始读取一次不可变 DouyinCredentials 快照，同一份完整 Cookie、来源浏览器 UA 贯穿房间 HTTP、签名请求和 WSS 握手。配置在本次 HTTP 途中更新，不会混入当前连接；重连重新读取完整快照、页面和短期签名参数。
+3. 优先从同 Cookie/UA 的当前房间页解析明确的 user_unique_id；支持既有 JSON、RENDER_DATA、pace hydration 与一次明确的 HTML 实体解码。只接受正整数文本/整数（1–30 位），不使用主播 UID、房间 ID、抖音号或随机数。仍有 2 MiB 页面上限、深度/重复键/房间一致性校验，不执行页面 JS。
+4. 四参数构造器继续支持手工 visitor：页面无该字段时使用手工值；页面值相同时允许；页面值不同、格式损坏或多个值冲突时明确失败。手工值不是绕过页面身份冲突的开关。null/空串表示自动，纯空格是非法输入。
+5. 本地校验新增公开入口，检查 Cookie/UA 缺失、ASCII 可打印请求头、CR/LF/控制字符、长度上限、可选 visitor 格式和本地截止时间。HTTP 完成及签名完成后再次检查到期；Cookie/UA 不自动 trim/替换。缺失/过期/非法输入不会联网或降级；本地未到期不表示平台 Cookie 仍有效。
+6. 复用 InboundDiagnostics，在主会话和 probe 日志中增加 credentialValidation、loginFields、visitorSource、platformLogin。只存固定枚举/布尔值；证据随 frame 的原 generation 保留，避免重连之后把新凭据状态标到旧排队事件。原日志容量、限频、累计计数、giftMethod→parse→normalize→queue→SINK_RETURNED 语义不变。
+7. Probe 的 external resolve/receive 允许不填 BIGFISH_DOUYIN_USER_UNIQUE_ID；缺 Cookie/来源 UA/截止时间仍明确失败。没有新增配置 API、浏览器数据库/钥匙串读取、Cookie 文件或长期辅助进程。
+
+新增固定永久错误：EXTERNAL_ID_MISSING（页面无明确字段且未给手工值）、EXTERNAL_ID_INVALID（明确字段类型/格式不合法）、EXTERNAL_ID_CONFLICT（不同页面值或手工/页面冲突）。重复 JSON 键、损坏 hydration 仍为 PAGE_STRUCTURE_CHANGED；guest 原 GUEST_ID_MISSING / PAGE_STRUCTURE_CHANGED 语义保留。错误没有原始异常 message/cause。关播或内部 roomId 改变先返回 ENDED，不要求旧广播继续补 visitor 或签名。
+
+## 主窗口接线说明（提案，未代改）
+
+可直接使用以下 collector 公开入口，无新增依赖或公共 DTO：
+
+```java
+// 自动 visitor；Cookie、UA、期限来自后端受控的同一配置快照。
+new DouyinCredentials(String cookie, String userAgent, Instant expiresAt);
+// 兼容高级手工 visitor，null/空串也可走自动解析。
+new DouyinCredentials(String cookie, String userAgent, String userUniqueId, Instant expiresAt);
+// void：仅本地检查，失败抛脱敏 DouyinFailure，不发请求、不确认登录。
+credentials.validateForResolution(Instant now);
+// boolean：仅存在非空 sessionid/sessionid_ss 字段，不确认平台会话有效。
+credentials.hasLoginFields();
+// 既有工厂继续可用：current() 每次连接读取一份完整配置。
+new WebDouyinConnectionProvider(WebDouyinConnectionProvider.CredentialSource source, DouyinSigner signer);
+// CredentialSource: DouyinCredentials current() throws DouyinFailure
+```
+
+- 当前 main 的 cn.bigfish.configuration.SessionCollectors.readExternalCredentials 仍硬性要求 visitor。要让主页面“不填 visitor”生效，请主窗口用 DouyinCredentials.validateForResolution(clock.instant()) 替代重复的旧必填/格式预校验，并保留无网络的启动检查及 guest 不读 external 的断言。不能只合并本提交就宣称管理页已支持自动 visitor。
+- 后端动态配置建议以不可变快照一次性提供 Cookie、来源 UA、可选 visitor、本地 expiresAt；避免逐字段并发读取混合两个浏览器身份。Provider 在自然重连时取新快照，不主动中断已有直播；运行时模式切换和配置生效策略由主窗口负责。现有 SessionCollectors 的 mode 在构造时固定，当前环境变量方式也不等于动态页面设置。
+- 管理页面浏览器 UA 不能自动冒充 Cookie 来源浏览器 UA。Cookie 只由后端注入采集层，页面响应和日志不得回显。expiresAt 是本地授权使用期限，不是对抖音 Cookie 服务端有效期的判断。
+- public DouyinRoomResolver.resolve(String, DouyinCredentials) 仍返回 DouyinRoom，仅做房间解析，允许未提供 visitor；真正连接时的身份发现由 provider 内部 resolveExternal 完成。ExternalAccess、诊断枚举和 resolved visitor 均没有扩展公共 REST 契约。
+- 新字段只在内部日志中，不要求公共 DTO 变化。示例中的 LOCAL_VALID / PRESENT / PAGE / UNVERIFIED 分别是本地格式通过、存在登录字段名、ID 来自页面、**平台登录未验证**；业务消息看 method/sink，礼物看 giftMethod/giftParsed/giftSinkReturned。SINK_RETURNED 仍不代表业务 ACCEPTED 或感谢语音播出。
+
+以下仅为人工数据的日志字段示例，省略原有方法及阶段计数，不是真实 external 成功证据：
+
+```json
+{"time":"2026-11-02T00:00:00Z","sessionId":"00000000-0000-4000-8000-000000000022","credentials":"EXTERNAL","credentialValidation":"LOCAL_VALID","loginFields":"PRESENT","visitorSource":"PAGE","platformLogin":"UNVERIFIED","generation":1,"frame":0,"message":0,"method":"FRAME","stage":"WINDOW","code":"COUNTS","giftMethod":0,"giftParsed":0,"giftSinkReturned":0}
+```
+
+## 离线测试（本轮实际运行）
+
+| 命令 | 结果 |
+| --- | --- |
+| ./scripts/maven.sh -B -ntp -pl backend '-Dtest=cn.bigfish.collector.*Test' test（修改前） | 97/97 通过，7.662 秒 |
+| 同上（最终行为代码） | **108/108 通过**，7.225 秒，23:34:20 +08:00 完成 |
+| ./scripts/maven.sh -B -ntp test | **295 项，293 通过、2 项真实云服务测试默认跳过，0 failure/error**，27.580 秒，23:40:16 +08:00 完成 |
+| git diff --check / git diff --cached --check | 通过 |
+
+新增 DouyinExternalSessionTest 9 项，覆盖：同 Cookie/UA 自动身份解析各 hydration/转义形状；字段缺失、冲突、错误类型/格式/重复键；手工缺省/一致/冲突优先级；完整 Cookie 保留、不接纳响应替换身份、不走 guest；缺失/到期/超长/非法头本地失败；HTTP 途中到期；房间结束/内部 ID 改变；配置轮换原子快照与重连刷新；真实本地 HTTP 的停止取消、资源归零、永久错误不重连；日志脱敏、登录未验证语义和旧 generation 证据隔离。
+
+NativeCollectorPipelineTest 新增自动 external 端到端替身用例，并在本地 HTTP 与实际 JDK WebSocket 握手接收端断言完整人工 Cookie/UA，未只检查构造出来的 Map。原 manual / guest、真实本地二进制分片/gzip/ACK/心跳/ENDED、人工礼物增量 1/2/1 断言保留。手工 fixture 的页面 visitor 与手工输入改为同一人工值，是为了验证新的身份一致性规则，未删除原礼物/隔离断言。ProbeTest 新增可选 visitor/缺 UA/非法 ID 验证。已有礼物连击/重复终包/不同用户、坏包隔离、队列容量与 TTL、限频/累计计数和停止回归全部通过。
+
+测试文件、凭据、昵称和 ID 均为人工值。完整后端验证后仅调整构造器 Javadoc，把“authenticated”改为同 Cookie/UA 页面，未改变行为；不把离线礼物当真实礼物。日志位于 /tmp/bigfish-external-baseline.log、/tmp/bigfish-external-targeted.log、/tmp/bigfish-external-collector.log、/tmp/bigfish-external-full.log，不提交日志文件。
+
+## 真实只读接收、请求账本与未完成条件
+
+用户提供房间 **999146174230**，并说明 external 凭据尚未配置，授权从 Safari 开发者工具读取。工具进程只检查环境变量是否存在，没有输出值；Cookie、来源 UA、截止时间均未注入。
+
+Safari 在本轮新建临时标签访问该指定房间并刷新一次，开发者网络面板显示文稿请求，但自动化接口连续返回 elementHasNoFrame / element invalidated，有限点击和键盘尝试未取得请求头。**未读到凭据、未保存 Cookie、未访问浏览器数据库/钥匙串**；关闭本轮临时标签及检查器，没有操作主项目会话。Safari 的页面资源/请求数未完整测量，不混入以下 Java probe 精确计数。
+
+独立 probe 用本工作树 scripts/dev-backend.sh 和 DouyinCollectorProbe main class；不启动 Spring 业务、DeepSeek/NLS。先一次 guest resolve 确认 LIVE，再一次 60 秒 receive，maxAttempts=1，无自动延长/额外房间。
+
+```sh
+env BIGFISH_DOUYIN_LIVE_PROBE=true BIGFISH_DOUYIN_ROOM=999146174230 \
+  BIGFISH_DOUYIN_PROBE_ACTION=receive BIGFISH_DOUYIN_CREDENTIAL_MODE=guest \
+  BIGFISH_DOUYIN_SIGNER_REVIEWED=true BIGFISH_DOUYIN_PROBE_SECONDS=60 \
+  BIGFISH_DOUYIN_PROBE_MAX_ATTEMPTS=1 BIGFISH_ALLOW_PAID=false \
+  ./scripts/dev-backend.sh -B -ntp \
+  -Dspring-boot.run.main-class=cn.bigfish.collector.DouyinCollectorProbe
+```
+
+resolve 使用同一入口，action=resolve；无需 signer 或 WSS。
+
+| 证据 | 本轮真实结果 |
+| --- | --- |
+| 只读 resolve | LIVE，HTTP 2 次，13593 ms，httpInFlight=0；无消息接收 |
+| receive | **23:43:42–23:44:42 +08:00**，60 秒预算含初始化，停止清理后 60250 ms；GUEST，generation=1，HTTP 2、签名 1、WSS 尝试/成功各 1 |
+| 帧/解码 | 完整 ASSEMBLY、QUEUE、PUSH、PAYLOAD、DECOMPRESS、RESPONSE、MESSAGE_LIST 各 96；ENVELOPE 260；未知类型 118，具名计数，不计作损坏 |
+| 业务到本地 sink | **COMMENT 28、ENTRANCE 90、LIKE 19、FOLLOW 3、GIFT 0**；Social method=5，其中 3 个支持的关注事件；未把其他 Social 动作计作解析失败 |
+| 礼物证据 | WebcastGiftMessage=0；giftParsed / giftParseFailed / giftNormalizeFailed / giftDuplicates / giftQueueDropped / giftSinkReturned / giftSinkFailed 全部 0；unattributedFailures=0 |
+| ACK/心跳/异常 | ACK_HEADER 96，成功 ACK 96，heartbeat 6；MALFORMED=0，duplicate=0，reconnect=0，lastError 空，inboundOmittedKeys=0 |
+| 停止与资源 | CONNECTED → STOPPED；sourceThreads / dispatchThreads / queuedEvents / attachedTransports / httpInFlight / signingWorkers 全部 0；probe 退出 0，Maven SUCCESS |
+| 新诊断线上值 | credentials=GUEST，credentialValidation=LOCAL_VALID，loginFields=ABSENT，visitorSource=PAGE，platformLogin=UNVERIFIED；没有输出实际 UA/ID/Cookie |
+
+Java 抖音 probe 合计 **HTTP 4 次、WSS 1 次**，只发送协议 ACK/心跳，没有评论、点赞、关注、购买礼物。日志 /tmp/bigfish-external-guest-resolve.log、/tmp/bigfish-external-guest-receive.log 仅有脱敏计数/结构摘要，不提交日志或完整帧。未运行真实 external，不存在同一时段 guest/external 对照。
+
+未知类型明细：WebcastRoomMessage=19、RoomIntro=1、ResidentGuest=2、LowPcuGuide=1、RoomDataSync=1、RoomRank=1、ChatLike=1、RoomStats=10、RanklistHourEntrance=26、InRoomBanner=36、**WebcastFansclubMessage=11**、RoomUserSeq=9（除完整写出的名称，均是 Webcast…Message）。FansclubMessage 不是本实现支持的 WebcastGiftMessage，本轮没有 payload 语义/自然送礼事实对照，不能把这 11 条直接当灯牌赠送、也不能据此排除其相关性。需要另有固定协议定义和脱敏结构证据才可决定新增业务映射，未猜测字段或转成 GIFT。
+
+**真实礼物、真实 external、Cookie 服务端登录有效性、真实礼物连击/数量、感谢语音均未验收。** 真实重连/关播未发生，本轮仅有离线覆盖；真实停止资源释放已通过。该游客窗口没观察到 Gift method，不能证明游客必然收不到礼物，也不能证明 external 必然恢复。
+
+## 来源、已知证据和下一步
+
+- 保留用户提供的既有会话事实：GUEST，Chat=95、Like=9、Gift=0，giftParsed/parseFailed/normalizeFailed/queueDropped/sinkReturned/unattributedFailures 均为 0。它支持优先查上游投递/凭据上下文，不支持改感谢模板来解释未出现的 Gift。Safari Cookie 面板/文稿 Cookie 的此前观察也不等于平台已经确认登录。
+- 本轮查阅 [DanmakuRender #544](https://github.com/SmallPeaches/DanmakuRender/issues/544)：2026-03-26 提问者反馈加入 Cookie 后收到礼物；此前有各房间表现不同的报告。这是第一手 issue 反馈，不是平台规则或本机复现。[DouyinLiveWebFetcher #164](https://github.com/saermart/DouyinLiveWebFetcher/issues/164) 既有登录 Cookie 成功反馈，也有后续失效反馈。只读讨论，没有复制代码；AGPL 采集/签名资源不纳入本仓库。
+- 对照固定 MIT 来源 jwwsjlm/douyinLive **af34f7c2ea2c4df90c6f4659e967fb31815d9255** 的 [http_context.go](https://github.com/jwwsjlm/douyinLive/blob/af34f7c2ea2c4df90c6f4659e967fb31815d9255/http_context.go) 与 [websocket_connection.go](https://github.com/jwwsjlm/douyinLive/blob/af34f7c2ea2c4df90c6f4659e967fb31815d9255/websocket_connection.go)：它包含 im/fetch 初始化并采用服务器 cursor/internal_ext/push server/心跳信息；Java 当前没有该步骤。**只是待验证差异，未获得同登录上下文参考实现 Gift>0 / Java Gift=0 的证据，本轮不适配、不复制历史参数。** 如后续证据支持适配，仍需保留域名、超时、响应大小、取消和尝试次数边界。
+- ymstar/dyhub 的固定 revision、根 MIT 与第三方签名 AGPL 边界见下方上一轮来源表。本轮继续原生 Java signer，无 Node/浏览器后台服务、许可或依赖新增提案。
+- 主窗口审核合并本分支（包括此前 b986466 分析文档），先完成上述 SessionCollectors/动态配置接线及相关回归，再在用户允许的维护时间重启后端；**不要为合并检查停止当前直播**。仅刷新管理页不会加载 Java 代码。
+- 下一次需用户在本机注入完整 Cookie、同来源 UA 和短期本地截止时间；visitor 可留空。遇到解析冲突/结构变化/登录或验证码要求，保留明确失败交用户处理。对一个当时 LIVE 的房间做 60–120 秒有界只读对照，不要求付费造样本。真实礼物验收分为建连、评论/点赞、Gift method、解析/归一化/sink；感谢播出由主窗口继续沿 gift_trace 联调。
+
+---
+
+# 礼物接收开源实现与登录态证据复核（2026-11-02，上一分析轮）
 
 用户反馈真实评论回复已可用，礼物感谢仍不工作，要求先查帖子/开源实现。本轮仅分析和更新本文，没有修改采集代码、运行新 probe、读取登录凭据或操作主直播。
 
